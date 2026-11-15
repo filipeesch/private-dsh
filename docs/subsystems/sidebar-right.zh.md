@@ -4,11 +4,11 @@
 
 右侧 Sidebar 是 Web Client 里每个会话一份的停靠面：会话区旁的一列 pane 与 tab，按地址寻址的内容——工作区文件、目录树、产品自带页面——在这里打开、分栏、浮出、关闭。[`dsh-client-ui-sidebar-right`](../../packages/client/ui-sidebar-right/README.zh.md) 拥有这个面、tab 类型注册表与导航服务；[`dsh-client-ui-dockkit`](../../packages/client/ui-dockkit/README.zh.md) 是它内部的布局引擎；[`dsh-client-resources`](../../packages/client/resources/README.zh.md) 把地址变成任何组件都能读的活数据；[`dsh-api-workspace-files`](../../packages/api/workspace-files/README.zh.md) 同时提供 Host 工作区文件服务与 Client `file` 资源提供者。
 
-本页是该子系统契约的参考：地址、tab 类型注册、导航服务、扩展 slot 与其 owner props、资源模型、Workspace Files 服务、内置类型，以及明确不做的事。布局引擎、frame 与停靠面如何拼在一起见 [Agent Note](../../.agents/notes/implemented/feature/2026-09-04-right-sidebar-docking-infrastructure.zh.md)；slot 机制见 [Slots 参考](slots.zh.md)。
+本页是该子系统契约的参考：地址、tab 类型注册、导航服务、扩展 slot 与其 owner props、面板 Factory 与其内嵌出现、资源模型、Workspace Files 服务、内置类型，以及明确不做的事。布局引擎、frame 与停靠面如何拼在一起见 [Agent Note](../../.agents/notes/implemented/feature/2026-09-04-right-sidebar-docking-infrastructure.zh.md)；slot 机制见 [Slots 参考](slots.zh.md)。
 
 ## 定位与归属
 
-每个会话恰有一个停靠面，保存在会话作用域的 slot store 里、由 `rightbar.session` 绘制。root 作用域的 `rightbar` 控制器为选中 Session 和拥有已初始化 `keepMounted` 正文的后台 Session 保留独立席位；只有前台 Conversation 可见。刷新会恢复已保存的布局（[状态](../../packages/client/ui-sidebar-right/README.zh.md#state)）。面的每一次变化都是 kit 纯规划器算出的一条历史记录；停靠的 pane 从不空着，根 pane 为空时会加入根据已注册引导入口选出的默认页。
+每个会话恰有一个停靠面，保存在会话作用域的 slot store 里、由面板 Factory `sidebar.right.panel` 绘制。一个面有两种出现。frame 的右列经 `rightbar.session` 席位渲染 `main` 变体，root 作用域的 `rightbar` 控制器为选中 Session 和拥有已初始化 `keepMounted` 正文的后台 Session 保留独立席位，只有前台 Conversation 可见。宿主面在它提供的 Session 区域里渲染 `embedded` 变体并拥有那个盒子。两种出现读同一会话的同一份 store 实例，因此无论面板出现在哪里，布局、tab、历史与持久化条目都是同一份。刷新会恢复已保存的布局（[状态](../../packages/client/ui-sidebar-right/README.zh.md#state)）。面的每一次变化都是 kit 纯规划器算出的一条历史记录；停靠的 pane 从不空着，根 pane 为空时会加入根据已注册引导入口选出的默认页。
 
 一个 tab 类型是共用定义 `id` 的两次注册：在 `ctx.sidebarRightTabs` 里的静态定义说明其 `kind` 打开哪些地址，一次 keyed slot 注册提供它的正文。框架注入 `useTabInfo()` 以读取 Sidebar、窗格和标签的实时信息；各类型把自身状态放在 slot store 里。各包之间只以类型形式引用彼此的声明。
 
@@ -20,6 +20,16 @@
 | [`api/workspace-files`](../../packages/api/workspace-files/README.zh.md) | Host `ctx.workspaceFiles`、`workspaceFiles` Remote 命名空间与 Client `file` 资源提供者 |
 | [`util/workspace-path`](../../packages/util/workspace-path/README.zh.md) | 文件地址语法：`fileAddressFor`、`parseFileAddress` |
 | [`client/ui-sidebar-documentpreview`](../../packages/client/ui-sidebar-documentpreview/README.zh.md)、[`client/ui-sidebar-files`](../../packages/client/ui-sidebar-files/README.zh.md)、[`client/ui-sidebar-browser`](../../packages/client/ui-sidebar-browser/README.zh.md) | 内置的 `text`、`files` 与 `browser` 类型 |
+
+## 内嵌出现
+
+宿主在它已经持有的 Session 区域里渲染 `renderFactorySlot('sidebar.right.panel', { variant: 'embedded' })`；该出现从渲染位置取得 Session，不接受独立的身份。出现的输入是 `{ variant, fullscreen?, active?, width?, retainTab? }`，其中 `fullscreen`、`width` 与 `retainTab` 属于 frame 出现。内嵌出现只提供 `variant`，填满宿主给出的盒子，并测量这个容器而不是读取 frame 几何。
+
+内嵌出现自己拥有呈现：它从不打开或关闭 frame 的右列，从不向 frame 报告全屏，其 tab 正文始终读到 `sidebar.fullscreen: false`。它的 chrome 保留 tab 条与折叠控件，渲染共享布局里已提交的分栏，不绘制分栏控件、全屏控件与浮窗；把 tab 拖出它的边界不改变任何东西。frame 出现创建的浮窗保留记录，并继续在那里绘制。
+
+在挂载且展开期间，内嵌出现经一个后进先出的层叠在屏上推导之上，成为 Sidebar 的导航目标：从它内部打开的资源链接、工具行号引用、页面快捷命令与 Assistant Markdown 链接都落在它里面，卸载或折叠它则恢复此前生效的目标。内嵌出现绘制某个会话的正文期间，frame 出现停止绘制该会话的正文，因此每个打开的 tab 只挂载一个正文。内嵌出现用一份不持有 Session 引用的租约保留 `keepMounted` 正文，因为内嵌宿主已经持有该会话。
+
+在任一种出现里关闭最后一个停靠的非 guide tab 都会关闭它并收起该列，而 guide 作为唯一停靠 tab 时不能被关闭。因为 store 是共享的，宿主面里的收起就是该会话回到主列时 frame 出现显示的状态。以内嵌出现为目标时，分栏与浮出请求不改变布局，而带 `destination: 'float'` 打开的资源改为落在停靠区。`ctx.sidebarRight.capabilities.embeddedPanel` 报告该面的存在，[`forSession`](../../packages/client/ui-sidebar-right/README.zh.md#ctxsidebarright) 服务于在任何出现挂载之前就要操作某个会话的宿主。
 
 ## 地址
 
@@ -77,6 +87,8 @@ export function apply(ctx: Context): void {
 
 两种打开构成导航控制器，进入这一列的每条路都调用其一：`openResource(address, options?)` 打开 `dsh-resource://` 地址——会话区的文件链接、工具行的行号引用、文件树的行；`openTab(kind, options?)` 打开页面——tab 条的新增控件、引导页入口框或 Assistant Markdown 中的 HTTP(S) 链接。两者都以一条历史记录走完四步——认领（注册表为资源排候选，或点名 `kind` 的生效实现应答）；聚焦已显示同一 `(kind, address)` 的 tab；否则落一个新 tab；展开这一列——然后把导航记入 Tab 域（[服务](../../packages/client/ui-sidebar-right/README.zh.md#ctxsidebarright)）。用户看不见的内容不算打开，所以折叠的列会在同一步展开；替换浮动 tab、或揭示浮窗中的 tab 时除外。揭示一个已在屏幕上显示的 tab 时，存放它的格发光提示一次，对所有 tab 类型都一样，且只在其会话位于屏幕上时播放；需要切换 tab 或展开该列的揭示不发光。`openResource` 对 `dsh-resource://` 之外的地址或无人认领的地址抛错；`openTab` 对无人注册的 kind 抛错：二者都是接线错误，不是用户错误。
 
+两种打开都作用于 Sidebar 的生效目标：挂载且展开期间自我报告的内嵌出现，否则就是屏上的会话。该目标决定哪个会话的 store 收到意图，所以从内嵌会话内部发起的打开落在它旁边的面板里。
+
 | 选项 | 含义 |
 |---|---|
 | `paneId` | 新 tab 落到这个 pane；缺省为活动的停靠 pane（活动的是浮窗时取第一个停靠 pane）。 |
@@ -89,15 +101,15 @@ export function apply(ctx: Context): void {
 
 落位属于调用方，不是 tab 类型的属性。[文件导航栏参考](../../packages/client/ui-sidebar-files/README.zh.md#the-navigator)定义其宿主提供的打开回调；[引导页参考](../../packages/client/ui-sidebar-right/README.zh.md#the-guide)定义引导页替换与显式关闭。
 
-`close(tabId)` 关闭一个 tab；`hide(tabId)` 关闭浮动 tab 或收起其停靠列；`active()` 返回活动 pane 的活动 tab；`isExpanded()` 与 `toggleExpanded()` 读取与翻转这一列，翻转记入序列。无会话时读操作返回 `undefined` 或 `false`；写操作需要已挂载的会话面，没有时抛错而不是写进没人绘制的面。
+`close(tabId)` 关闭一个 tab；`hide(tabId)` 关闭浮动 tab 或收起其停靠列；`active()` 返回活动 pane 的活动 tab；`isExpanded()` 与 `toggleExpanded()` 读取与翻转这一列，翻转记入序列。无目标时读操作返回 `undefined` 或 `false`；写操作需要目标——屏上的会话，或自我报告的内嵌出现——没有时抛错而不是写进没人绘制的面。`forSession(sessionId)` 服务于在会话进入屏幕之前或不在屏幕上时就要操作它的宿主：`expanded` 是一个在任何出现挂载之前回答 `false` 的可观察量，`openTabs()` 返回该会话已提交的 tab，`setExpanded`/`toggleExpanded` 在其 store 存在时写穿它，否则记录面板挂载时应用的那份意图。`capabilities.embeddedPanel` 报告面板 Factory 在 frame 列之外渲染。
 
 `focus(tabId)` 让一个 tab 成为其 pane 的活动 tab；`split(paneId?)` 分割活动的停靠 pane 或点名的 pane，返回新 pane 的 id——pane 数预算或列宽不允许时返回 `undefined` 且不记账；`float(tabId, rect?)` 把一个 tab 浮出为浮窗 pane；`dock(paneId)` 把浮窗 pane 收回停靠区并展开该列。四者都走 store 既有动作、各记一条历史；目标不存在或已处于目标状态时是空操作，与 `open` 一样在没有已挂载会话面时抛错。`TabId`、`PaneId`、`TabRecord`、`FloatRect` 自本包 `/client` 入口再导出，调用方无需引 dockkit。
 
-`focusedTarget(element?)` 从实时 DOM 焦点（包括内嵌 iframe）捕获可见页面；侧栏外部或过期的侧栏标记不产生目标。`commandTarget(element?)` 还允许侧栏外部发起的打开操作使用已挂载 Session 的活动停靠窗格。`SidebarRightTarget` 捕获 Session、窗格、host、tab occurrence 和导航 revision。`isTargetCurrent(target)` 在执行前检查这些身份，因此重新打开记录或再次导航都会使已捕获的动作失效；它不会改为操作其他页面。关闭与落位结果见[控制器方法](../../packages/client/ui-sidebar-right/src/client/service.ts)。
+`focusedTarget(element?)` 从实时 DOM 焦点（包括内嵌 iframe）捕获可见页面；侧栏外部或过期的侧栏标记不产生目标。`commandTarget(element?)` 还允许侧栏外部发起的打开操作使用目标 Session 的活动停靠窗格。`SidebarRightTarget` 捕获 Session、窗格、停靠或浮窗宿主、出现宿主、tab occurrence 和导航 revision。`isTargetCurrent(target)` 在执行前检查这些身份，因此重新打开记录、再次导航或切换出现都会使已捕获的动作失效；它不会改为操作其他页面。两者都按持有焦点元素的出现解析，所以同一会话的两次出现不会互相应答。分栏与浮出只在 frame 出现是目标时执行。关闭与落位结果见[控制器方法](../../packages/client/ui-sidebar-right/src/client/service.ts)。
 
 ## Slot 与 owner props
 
-Sidebar 声明四个扩展 slot；其文档 tab 另行声明下表中的 keyed 文档正文 slot（[层级](slots.zh.md)）。
+面板 Factory `sidebar.right.panel` 为它的两种出现声明 tab 正文与 tab 标题两个席位；本包的引导页、tab 菜单与文档 tab 声明下表中的其余席位（[层级](slots.zh.md)）。
 
 | Slot | Cardinality | 用途 |
 |---|---|---|
@@ -107,7 +119,7 @@ Sidebar 声明四个扩展 slot；其文档 tab 另行声明下表中的 keyed �
 | `sidebar.right.tab.menu.item` | list，会话作用域 | 追加在 kit 自身布局动作之后的内容级动作。执行了动作的条目必须调用 owner 的 `dismiss()`。 |
 | `sidebar.right.tab.document` | 按文档实现的 `id` keyed，会话作用域 | 文档 tab 内选中的文件渲染器；父组件拥有共享加载与工具栏控件。 |
 
-正文、标题与引导页替换项接收框架注入的 `useTabInfo()`。它返回 `{ sidebar, panel, tab }`：`sidebar` 包含 `expanded` 与 `fullscreen`，`panel.id` 标识所属窗格，必填的 `panel.isFloating: boolean` 区分浮窗与停靠窗格。tab 移动时，两者通过 hook 更新，`tab.id` 保持不变。`tab` 还包含其他记录字段以及 `visible`、`navigation`、`signal` 和 `actions`。所有 tab 都要求 Session 位于前台。停靠正文还要求展开且选中；停靠标题要求展开；前台浮窗不随整栏收起。`signal` 在记录消失或插件卸载时中止，不因隐藏或切换 Session 而中止。`tab.actions` 提供绑定到标签所属 Session 的 `openResource`、`openTab` 与 `close`。打开操作返回 `void`，缺省落在当前所属停靠窗格，当前 tab 浮动时落在活动停靠窗格；`revealIfOpened` 缺省为 `true`，`replaceTab: true` 让新内容在同一历史项中替换本记录；带 `destination` 的 `openResource` 既不传本 tab 所在窗格，也不传本记录。菜单项保留普通的 `tab` 与 `dismiss` owner 参数。
+正文、标题与引导页替换项接收框架注入的 `useTabInfo()`。它返回 `{ sidebar, panel, tab }`：`sidebar` 包含 `expanded` 与 `fullscreen`（内嵌出现里 `fullscreen` 始终为 `false`），`panel.id` 标识所属窗格，必填的 `panel.isFloating: boolean` 区分浮窗与停靠窗格。tab 移动时，两者通过 hook 更新，`tab.id` 保持不变。`tab` 还包含其他记录字段以及 `visible`、`navigation`、`signal` 和 `actions`。所有 tab 都要求其出现所属的 Session 区域。停靠正文还要求展开且选中；停靠标题要求展开；前台浮窗不随整栏收起，内嵌出现只绘制停靠树。`signal` 在记录消失或插件卸载时中止，不因隐藏或切换 Session 而中止。`tab.actions` 提供绑定到标签所属 Session 的 `openResource`、`openTab` 与 `close`。打开操作返回 `void`，缺省落在当前所属停靠窗格，当前 tab 浮动时落在活动停靠窗格；`revealIfOpened` 缺省为 `true`，`replaceTab: true` 让新内容在同一历史项中替换本记录；带 `destination` 的 `openResource` 既不传本 tab 所在窗格，也不传本记录。菜单项保留普通的 `tab` 与 `dismiss` owner 参数。
 
 `navigation.revision` 在每次导航到该 tab 时递增，`params` 不变也递增，正文可仅凭「又被导航了」行动；按地址打开的 tab 为 `1`，没有人按地址打开的记录——种入的引导、刷新或撤销恢复的 tab——为 `0`。Tab 域为每条打开的记录保有一个 occurrence：记录出现即在资源模型里钉住，因此切换 tab 卸载正文也不丢内容；记录消失即中止并丢弃；撤销恢复的记录是新的 occurrence（[Tab 域](../../packages/client/ui-sidebar-right/README.zh.md#the-tab-domain)）。
 
@@ -151,8 +163,9 @@ Host 的 `ctx.workspaceFiles` 服务与生成的 `workspaceFiles` Remote 命名�
 ## 不做
 
 - 跨设备布局同步：布局保存在浏览器本地，各 Session 独立保存状态（[状态](../../packages/client/ui-sidebar-right/README.zh.md#state)）。
-- `ctx.sidebarRight` 上的只读布局快照或订阅：服务只暴露操作，dockkit 的 `LayoutState`/`LayoutOp` 是内部的。
-- 服务上的能力探测数组（`features`）。
+- `ctx.sidebarRight` 上的整份布局快照或操作日志：`forSession` 只读一个会话的展开状态与打开 tab 元数据，dockkit 的 `LayoutState`/`LayoutOp` 仍是内部的。
+- `capabilities.embeddedPanel` 之外的能力探测。
+- 内嵌出现里分栏与全屏快捷键的拒绝提示：那里不绘制它们的控件，命令是静默空操作。
 - tab 类型的 `option` 优先级档：没有「只列出、不许认领」的 tab 类型。
 - 改写记录的标题：`title(address)` 只捕获一次；活的 chip 来自标题 slot，而不是记录。
 - 打开时点名某个 tab 实现：`openResource` 最多点名一个 kind；文档渲染器由文件 tab 的工具栏选择。

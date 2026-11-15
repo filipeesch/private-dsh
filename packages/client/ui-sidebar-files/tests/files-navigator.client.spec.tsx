@@ -174,8 +174,8 @@ describe('FileNavigator beside a preview', () => {
     registry.register({ id: 'text', kind: 'text', patterns: ['dsh-resource://file/**'], title: address => address })
     const sidebar = createSidebarRightController(registry, () => {}, {
       autoFullscreen: () => false,
-      openWithFocus: (_session, open) => { open() },
-      closeWithFocus: (_session, _pane, close) => { close() },
+      openWithFocus: (_session, _host, open) => { open() },
+      closeWithFocus: (_session, _host, _pane, close) => { close() },
     })
     const store = createSidebarRightStore(() => ({ kind: 'guide', title: 'Start' })).create()
     onTestFinished(sidebar.adopt(SESSION, store))

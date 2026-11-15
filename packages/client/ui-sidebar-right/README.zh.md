@@ -9,12 +9,13 @@ kind: "package-reference"
 
 ## 概述
 
-右侧 Sidebar：停靠套件与本产品相遇的地方。它为每个会话持有一个停靠面，以两种呈现形态之一把它画成贴靠框架右列边缘的一块面板，把展开按钮放进会话 header，并拥有导航控制器（`ctx.sidebarRight`）、tab 类型注册表（`ctx.sidebarRightTabs`），以及告诉每个已开 tab 它是如何被导航到、能活多久的 Tab 域。
+右侧 Sidebar：停靠套件与本产品相遇的地方。它为每个会话持有一个停靠面，并通过一个公开的面板 Factory 渲染它——frame 的右列把 `main` 出现画成贴靠框架右列边缘的一块面板，取两种呈现形态之一；内嵌宿主则在自己拥有的盒子里画出 `embedded` 出现。它把展开按钮放进会话 header，并拥有导航控制器（`ctx.sidebarRight`）、tab 类型注册表（`ctx.sidebarRightTabs`），以及告诉每个已开 tab 它是如何被导航到、能活多久的 Tab 域。
 
 ## 目录
 
 - [什么住在这里，什么不住](#what-lives-here-and-what-does-not)
 - [呈现形态](#presentations)
+- [面板 Factory](#the-panel-factory)
 - [展开按钮](#the-expand-button)
 - [状态](#state)
 - [扩展席位](#extension-seats)
@@ -50,6 +51,19 @@ kind: "package-reference"
 席位通过 `ctx.layout.openRightbar(track, fullscreen)` / `closeRightbar()` 报告呈现，框架不注入本包。宽屏切换全屏不改变中栏宽度；宽度拖拽区只在普通展开态显示。独立浮窗及 `float`/`dock` 操作保持可用。
 
 面板没有标题行。它的两个控件——形态切换与折叠按钮——搭在套件 chrome 席位上，位于右上格 tab 条的最末端，因此 tab 条就是面板的整条上边。每条 tab 条从左到右读作：在允许时带关闭按钮的 tab 胶囊，添加控件（只在该格没有引导 tab 时绘制；它通过 `ctx.sidebarRight.openTab` 在该格打开引导页），该格的分栏控件，以及右上格里的两个面板控件。窄格里只有 chip 让位；其后的控件从不收缩或被裁切。
+
+<a id="the-panel-factory"></a>
+## 面板 Factory
+
+`sidebar.right.panel` 是某个会话面板的公开组合。它是会话作用域，只有一个出现输入：`{ variant: 'main' | 'embedded', fullscreen?, active?, width?, retainTab? }`。`main` 变体属于 frame 的右列：`rightbar.session` 席位算出轨道、宽度、呈现与空间规则，然后用 `fullscreen`、`active`、`width` 与背靠 View 的 `retainTab` 渲染 Factory。`embedded` 变体属于宿主面：宿主把该出现包进自己持有的 Session 区域，只提供变体，面板填满并测量那个盒子。宿主用 `renderFactorySlot('sidebar.right.panel', { variant: 'embedded' })` 渲染它。
+
+Factory 在其已注册定义的生命周期内声明两个 tab 扩展席位——`sidebar.right.pane.tab` 与 `sidebar.right.pane.tab.title`——因此每个 tab 类型只注册一次，其正文就在该会话的每一次已挂载出现里渲染。frame 席位自己不声明任何 tab 席位；它渲染 Factory 并上报呈现。
+
+两种出现共享每个会话一份 store 实例，由 slot 运行时依据 Factory 声明的 store handle 铸造。布局、已开 tab、历史与 `dsh.sidebar-right.v1.<sessionId>` 条目因此是同一份状态；哪个出现先铸造 store，就由它接管——面板挂载时，或面板尚未挂载时的会话 header 展开按钮。Tab 域同步、`openTabs` 与终端保活都跟随这次接管。
+
+内嵌出现自己拥有呈现与 chrome。它从不请求 frame 轨道，也不上报 frame 全屏，其 tab 正文始终读到 `sidebar.fullscreen: false`。它保留 tab 条与折叠控件，渲染共享布局里已提交的分栏，不绘制分栏控件、全屏控件与浮窗，因此把 tab 拖出它不改变任何东西。挂载且展开期间它是导航目标（见 [`ctx.sidebarRight`](#ctxsidebarright)），frame 出现则停止绘制该会话的正文，所以每个打开的 tab 只有一个已挂载正文。它的 `keepMounted` 正文由一份不持有 Session 引用的租约保留，因为内嵌宿主已经持有该会话。栏、分栏与宽度由宿主决定，包括面板覆盖会话区的窄屏情形。
+
+`ctx.sidebarRight.capabilities.embeddedPanel` 报告这套组合的存在；找不到它的宿主保持自己的行为。读取与写入某个具名会话的展开状态与已开 tab 由 [`forSession`](#ctxsidebarright) 负责。
 
 <a id="the-expand-button"></a>
 ## 展开按钮
@@ -100,7 +114,7 @@ tab 类型分两阶段注册，随包发布的引导类型走的正是别的包�
 
 `openResource`、`openResourceIn` 与 `tab.actions.openResource` 还接受 `destination: 'sidebar' | 'float'`：它指定宿主位置而非分栏，优先于 `paneId`、`preferNewPane`、`replaceTab` 与 `revealIfOpened`；此时 `tab.actions` 既不传自己所在的格，也不把自己作为被替换的 tab，不会关闭任何 tab。匹配依据会话、认领的 kind 与 content id。请求的宿主里已有副本时揭示它，该副本原本就在屏幕上时发光提示。否则把另一宿主中的一份副本移过去，保留其 tab id、occurrence、signal 及滚动位置等正文状态，不运行其关闭处理器。否则在该宿主新开 tab。`'sidebar'` 使用活跃停靠格（活动格是浮窗时为第一个停靠格），从不分栏，并展开该列；空的收起根格直接接收该 tab，旁边不补默认页。`'float'` 在下一个级联位置新建浮窗，新开和移动都不改变该列的展开状态；停靠 tab 离开所在格后按通常的空格规则处理。其他副本保持打开。每次打开仍交付 `params` 并递增 `revision`，整次打开（含移动）是一条历史。不传 `destination` 时，落位规则与上文相同。
 
-`close(tabId)` 关闭一个 tab；`hide(tabId)` 关闭浮动 tab 或收起其停靠列；`active()` 读取活动 tab。`isExpanded()` 与 `toggleExpanded()` 读取并驱动该列的展开；`toggleFullscreen(target)` 对捕获的停靠分栏执行面板控件的显示模式操作。布局操作供以编程方式安排该列的调用方使用，每个都像它替代的手势一样被记录：`focus(tabId)` 聚焦一个 tab 及其格；`split(paneId?)` 在与 tab 条控件相同的格预算与空间规则下分栏一个停靠格（默认活跃格），返回新格的 id，做不到时返回 `undefined`——且不记录任何东西；`float(tabId, rect?)` 把停靠 tab 浮出为浮窗；`dock(paneId)` 把浮窗放回活跃停靠格并展开该列，与浮窗的收回控件一致。不存在的 tab 或格、或已处于调用目标状态的，都原样不动。该接口只暴露操作：没有布局快照、没有操作日志、没有按地址查找。`_undo()` / `_redo()` 步进屏幕上停靠面的历史；它们是 `@internal`——序列没有面向用户的控件，这两个只为测试存在。命令通过屏幕上会话已采用的 store 作用于该会话；没有会话在屏幕上、或运行时尚未创建它的 store 时，命令 throw，而不是写进一个没人绘制的面里。`mounted` 是「屏幕上的会话」的可观察值：Conversation 占据主栏时为选中的会话，全局面板替代它或没有选中会话时为 `undefined`。插件从会话选择与 `ctx.layout.panelInfo` 推导它，它在 React 渲染引起变化的那次更新之前就已改变，因此同一次提交里渲染的组件读到的是到来的会话，并可以在自己的 effect 里对它行动：框架在同一轮渲染里渲染该会话的席位，席位随之创建它的 store。席位从不发布它；每个席位只上报它渲染时依据的事实：停靠套件测得的空间，`split` 与 `preferNewPane` 把它用于该会话的分栏（未测量的分栏视为有空间）；以及框架宽度是否让面板自动全屏，全屏命令据此执行。计划审阅的自动打开通过绑定的 hook 读取 `mounted`。
+`close(tabId)` 关闭一个 tab；`hide(tabId)` 关闭浮动 tab 或收起其停靠列；`active()` 读取活动 tab。`isExpanded()` 与 `toggleExpanded()` 读取并驱动该列的展开；`toggleFullscreen(target)` 对捕获的停靠分栏执行面板控件的显示模式操作。布局操作供以编程方式安排该列的调用方使用，每个都像它替代的手势一样被记录：`focus(tabId)` 聚焦一个 tab 及其格；`split(paneId?)` 在与 tab 条控件相同的格预算与空间规则下分栏一个停靠格（默认活跃格），返回新格的 id，做不到时返回 `undefined`——且不记录任何东西；`float(tabId, rect?)` 把停靠 tab 浮出为浮窗；`dock(paneId)` 把浮窗放回活跃停靠格并展开该列，与浮窗的收回控件一致。不存在的 tab 或格、或已处于调用目标状态的，都原样不动。该接口暴露作用于生效目标的操作——挂载且展开期间自我报告的内嵌出现，否则是屏幕上的会话——以及一份按会话的读取面：没有整份布局快照、没有操作日志、没有按地址查找。`forSession(sessionId)` 为不一定在屏幕上的会话返回 `{ sessionId, expanded, openTabs(), setExpanded, toggleExpanded }`：任何出现挂载之前 `expanded` 回答 `false`，`openTabs()` 列出它已提交的元数据，写入在其 store 存在时写穿它，否则记录面板挂载时应用的那份意图。`capabilities.embeddedPanel` 说明面板 Factory 在 frame 列之外渲染。`_undo()` / `_redo()` 步进屏幕上停靠面的历史；它们是 `@internal`——序列没有面向用户的控件，这两个只为测试存在。命令通过屏幕上会话已采用的 store 作用于该会话；没有会话在屏幕上、或运行时尚未创建它的 store 时，命令 throw，而不是写进一个没人绘制的面里。`mounted` 是「屏幕上的会话」的可观察值：Conversation 占据主栏时为选中的会话，全局面板替代它或没有选中会话时为 `undefined`。插件从会话选择与 `ctx.layout.panelInfo` 推导它，它在 React 渲染引起变化的那次更新之前就已改变，因此同一次提交里渲染的组件读到的是到来的会话，并可以在自己的 effect 里对它行动：框架在同一轮渲染里渲染该会话的席位，席位随之创建它的 store。席位从不发布它；每个席位只上报它渲染时依据的事实：停靠套件测得的空间，`split` 与 `preferNewPane` 把它用于该会话的分栏（未测量的分栏视为有空间）；以及框架宽度是否让面板自动全屏，全屏命令据此执行。计划审阅的自动打开通过绑定的 hook 读取 `mounted`。
 
 `focusedTarget(element?)` 解析当前 DOM 分栏和标签页，也接受嵌入 iframe；焦点位于外部时不返回页面。`commandTarget(element?)` 另外允许外部打开动作使用屏幕上会话的活动停靠分栏。捕获值包含 occurrence 和导航版本；`isTargetCurrent(target)` 拒绝会话变更、已移动或重新打开的标签页，以及期间发生的导航。焦点和指针激活独立于持久化的布局选择。
 
@@ -155,6 +169,9 @@ root 作用域的 `sidebar.right.tab.guide.actions` list 有注册项时，引�
 - **未暴露撤销。** 记录的序列只能通过 `@internal` 服务方法步进；产品控件是有意缺席的。
 - **标题在打开时固定。** 类型的 `title(address)` 被捕获进记录；会变的标题只来自可选的标题席位。
 - **没有内容导航栈。** 后退回放的是布局操作；编辑器式的「已访问内容」前进/后退尚未构建。
+- **宿主面不绘制浮窗。** 内嵌出现只渲染停靠树；frame 出现创建的浮窗保留记录并继续在那里绘制，请求浮窗宿主的打开改为落在停靠区。
+- **展开状态是共享的。** 两种出现读同一份 store，因此宿主面里的收起或展开就是该会话回到主列时 frame 列显示的状态。
+- **宿主面里的分栏与全屏是静默的。** 内嵌出现不绘制它们的控件，它们的键盘命令在那里解析为空操作。
 
 <a id="dev-note"></a>
 ### 开发备注

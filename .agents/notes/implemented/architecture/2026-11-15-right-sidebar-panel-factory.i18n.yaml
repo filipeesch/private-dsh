@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-11-15-right-sidebar-panel-factory.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-11-15-right-sidebar-panel-factory.md
+/agent-note-right-sidebar-panel-factory:
+  en: 456ea41dff2ee236
+  zh: 3ec84796499d4fb9
+/agent-note-right-sidebar-panel-factory/problem:
+  en: 5894ddae3c4265dd
+  zh: 002769c2d17f7c32
+/agent-note-right-sidebar-panel-factory/decision:
+  en: 4ff0bac28fb242c4
+  zh: 9f7a5dd67e663a4d
+/agent-note-right-sidebar-panel-factory/alternatives-considered:
+  en: 47692117306151c5
+  zh: 88de81e3a78d447e
+/agent-note-right-sidebar-panel-factory/consequences:
+  en: 0b9af5407d791d97
+  zh: a081f813686314c9

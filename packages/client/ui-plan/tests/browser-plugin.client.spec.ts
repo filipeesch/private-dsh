@@ -111,8 +111,8 @@ describe('ui-plan browser apply', () => {
     const store = createSidebarRightStore(() => ({ kind: 'guide', title: 'Guide' })).create()
     const { controller, adopt, show } = createSidebarRightController(tabs, vi.fn(), {
       autoFullscreen: () => false,
-      openWithFocus: (_sessionId, open) => { open() },
-      closeWithFocus: (_sessionId, _paneId, close) => { close() },
+      openWithFocus: (_sessionId, _host, open) => { open() },
+      closeWithFocus: (_sessionId, _host, _paneId, close) => { close() },
     })
     const release = adopt(parent, store)
     store.actions.open(parent)

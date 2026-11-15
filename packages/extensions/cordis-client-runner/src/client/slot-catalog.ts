@@ -3641,7 +3641,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'shadows-shipped-ui',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'rightbar.session\', () => ctx.slots.register(\n      { name: \'rightbar.session\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-sidebar-right/src/client/contract/slots.ts:43',
+    source: 'packages/client/ui-sidebar-right/src/client/contract/slots.ts:49',
   },
   {
     key: 'root',
@@ -4755,7 +4755,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     keyDomain: 'open: any string the owner dispatches (no compile-time key set), none are taken yet',
     hookContext: 'TabHookContext',
     slotInject: 'SidebarRightTabInjected',
-    declaredBy: 'an entry in \'rightbar.session\' (client-ui-sidebar-right), so it exists while that entry is mounted',
+    declaredBy: 'factory \'sidebar.right.panel\' (client-ui-sidebar-right), so it exists while that definition is registered',
     occupants: [
       'client-ui-deliverables ReviewTab',
       'client-ui-plan PlanPreview',
@@ -4774,7 +4774,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.right.pane.tab\', () => ctx.slots.register(\n      { name: \'sidebar.right.pane.tab\', key: \'<one key the owner dispatches>\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-sidebar-right/src/client/contract/slots.ts:59',
+    source: 'packages/client/ui-sidebar-right/src/client/contract/slots.ts:65',
   },
   {
     key: 'sidebar.right.pane.tab.title',
@@ -4816,7 +4816,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     keyDomain: 'open: any string the owner dispatches (no compile-time key set), none are taken yet',
     hookContext: 'TabHookContext',
     slotInject: 'SidebarRightTabInjected',
-    declaredBy: 'an entry in \'rightbar.session\' (client-ui-sidebar-right), so it exists while that entry is mounted',
+    declaredBy: 'factory \'sidebar.right.panel\' (client-ui-sidebar-right), so it exists while that definition is registered',
     occupants: [
       'client-ui-plan PlanTitle',
       'client-ui-schedule ScheduleTaskTabTitle',
@@ -4830,7 +4830,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.right.pane.tab.title\', () => ctx.slots.register(\n      { name: \'sidebar.right.pane.tab.title\', key: \'<one key the owner dispatches>\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-sidebar-right/src/client/contract/slots.ts:73',
+    source: 'packages/client/ui-sidebar-right/src/client/contract/slots.ts:79',
   },
   {
     key: 'sidebar.right.tab.document',
@@ -5219,7 +5219,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     occupants: [],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.right.tab.guide\', () => ctx.slots.register(\n      { name: \'sidebar.right.tab.guide\', select: owner => null },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-sidebar-right/src/client/contract/slots.ts:84',
+    source: 'packages/client/ui-sidebar-right/src/client/contract/slots.ts:90',
   },
   {
     key: 'sidebar.right.tab.guide.actions',
@@ -5274,7 +5274,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.right.tab.guide.actions\', () => ctx.slots.register(\n      { name: \'sidebar.right.tab.guide.actions\', id: \'my-entry\', order: 100, label: \'My entry\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-sidebar-right/src/client/contract/slots.ts:91',
+    source: 'packages/client/ui-sidebar-right/src/client/contract/slots.ts:97',
   },
   {
     key: 'sidebar.right.tab.guide.entry',
@@ -5324,7 +5324,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.right.tab.guide.entry\', () => ctx.slots.register(\n      { name: \'sidebar.right.tab.guide.entry\', key: \'<one key the owner dispatches>\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-sidebar-right/src/client/contract/slots.ts:93',
+    source: 'packages/client/ui-sidebar-right/src/client/contract/slots.ts:99',
   },
   {
     key: 'sidebar.right.tab.menu.item',
@@ -5386,7 +5386,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     occupants: [],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.right.tab.menu.item\', () => ctx.slots.register(\n      { name: \'sidebar.right.tab.menu.item\', id: \'my-entry\', order: 100, label: \'My entry\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-sidebar-right/src/client/contract/slots.ts:105',
+    source: 'packages/client/ui-sidebar-right/src/client/contract/slots.ts:111',
   },
   {
     key: 'sidebar.session.action',

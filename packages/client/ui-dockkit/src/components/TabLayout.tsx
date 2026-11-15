@@ -25,6 +25,8 @@ interface LayoutProps extends TabRetention {
   readonly callbacks: PaneCallbacks
   readonly preview: SizePreview | undefined
   readonly intents: DockIntents
+  /** Draw the docked tree only: floating records keep their state without a host. */
+  readonly dockOnly?: boolean
 }
 
 interface TabHostProps extends LayoutProps {
@@ -118,7 +120,7 @@ function TabHost({ state, callbacks, intents, tab, pane, column, floats, focusRe
  * @throws if the docked tree is not one pane or two horizontal panes.
  */
 export function TabLayout(props: LayoutProps): ReactNode {
-  const { state, callbacks, preview } = props
+  const { state, callbacks, preview, dockOnly = false } = props
   const focusRequest = useRef<{ readonly tabId: TabId; readonly origin: Element | null }>()
   // Each pane's strip remounts under the newly selected tab's host.
   const [offsets] = useState(() => new Map<PaneId, number>())
@@ -143,11 +145,14 @@ export function TabLayout(props: LayoutProps): ReactNode {
     <div className={css.tabLayout} data-dockkit-split={root.kind === 'split' ? root.id : undefined}
       style={{ gridTemplateColumns: columns }}>
       {/* Logical order changes must not make React move a connected webview's ancestor. */}
-      {Object.values(state.tabs).sort((a, b) => a.id.localeCompare(b.id)).map((tab) => {
-        const pane = findTabPane(state, tab.id)
-        return <TabHost key={tab.id} {...props} callbacks={tabCallbacks} tab={tab} pane={pane}
-          column={panes.findIndex(candidate => candidate.id === pane.id)} floats={floats} focusRequest={focusRequest} offsets={offsets} />
-      })}
+      {Object.values(state.tabs)
+        .filter(tab => !dockOnly || findTabPane(state, tab.id).host === 'dock')
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .map((tab) => {
+          const pane = findTabPane(state, tab.id)
+          return <TabHost key={tab.id} {...props} callbacks={tabCallbacks} tab={tab} pane={pane}
+            column={panes.findIndex(candidate => candidate.id === pane.id)} floats={floats} focusRequest={focusRequest} offsets={offsets} />
+        })}
       {panes.filter(pane => pane.tabs.length === 0).map(pane => (
         <div key={pane.id} className={css.emptyTabHost} data-dockkit-empty style={{ gridColumn: panes.indexOf(pane) * 2 + 1, gridRow: 1 }}>
           <TabPanel state={state} pane={pane} callbacks={callbacks} />
