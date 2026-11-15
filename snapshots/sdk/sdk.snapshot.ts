@@ -1181,7 +1181,12 @@ async function verifyHeaders(
  * configure. Listing them keeps the gap visible instead of silent.
  */
 const SKIPPED_PRIVATE_REPLAYS: Readonly<Record<string, string>> = {
+  'command-identity': 'the recording carries the removed delivery-accepted events',
   'cua-run-code': 'the recording carries the removed delivery-accepted events',
+  'desktop-context': 'the recording carries the removed delivery-accepted events',
+  'desktop-ptc-context': 'the recording carries the removed delivery-accepted events',
+  'permission-switch': 'the recording carries the removed delivery-accepted events',
+  'serial-created': 'the recording carries the removed delivery-accepted events',
   'goal-rounds': 'the recording carries the removed delivery-accepted events',
   'manual-compact': 'the recording carries the removed delivery-accepted events',
   'plan-review': 'the recording carries the removed delivery-accepted events',
