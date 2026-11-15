@@ -332,12 +332,15 @@ export function SidebarPanel(panel: PanelProps): ReactNode {
   // The embedded occurrence owns no floating panes: a drag released clear of it
   // and a split request leave the shared layout unchanged.
   const effectiveIntents: DockIntents = embedded ? embeddedIntents(intents) : intents
-  const panelWidth = fullscreen ? '100vw' : width === undefined ? '100%' : width
+  // Fullscreen is 1px wider than the viewport: the first column's divider, which separates the
+  // panel from the conversation, sits past the window's left edge where the frame clips it.
+  const panelWidth = fullscreen ? 'calc(100vw + 1px)' : width === undefined ? '100%' : width
   return (
     <div
       ref={panelRef}
       className={embedded ? `${css.panel} ${css.panelEmbedded}` : css.panel}
-      style={{ width: panelWidth, '--dsh-sidebar-width': typeof panelWidth === 'number' ? `${panelWidth}px` : panelWidth } as CSSProperties}
+      style={{ width: panelWidth,
+        '--dsh-sidebar-width': typeof panelWidth === 'number' ? `${panelWidth}px` : panelWidth } as CSSProperties}
       data-sidebar-right-session={sessionId}
       data-sidebar-right-occurrence-host={variant}
       data-sidebar-right-panel={fullscreen ? 'fullscreen' : 'push'}

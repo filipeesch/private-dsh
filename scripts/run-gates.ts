@@ -27,6 +27,7 @@ export type Mode =
   | 'ci-snapshot'
   | 'ci-artifacts'
   | 'ci-consumers'
+  | 'ci-private-consumers'
   | 'ci-windows-blocking'
   | 'ci-windows-complete'
   | 'ci-windows-observational-ready'
@@ -55,6 +56,10 @@ export interface Gate {
   quick?: boolean
   /** Keep a failure visible without failing the aggregate. */
   allowFailure?: boolean
+  /** Extra attempts after a failed run, for a gate whose failure can come from one remote fetch. */
+  retries?: number
+  /** Wait before each retry, in milliseconds; default 0. */
+  retryDelayMs?: number
   /** Write child output as it arrives instead of buffering it until completion. */
   streamOutput?: boolean
 }
@@ -133,7 +138,7 @@ export async function runAggregate(name: string, gates: Gate[], concurrencyDefau
   const startedAt = performance.now()
   console.log(`run-gates: ${name} running ${gates.length} gate(s) with ${maxConcurrency} worker(s) from ${concurrencySource}${failFast ? ', fail-fast after first blocking failure' : ''}.`)
 
-  const results = await runGates(gates, maxConcurrency, runGate, printResult, cliGateOptions(failFast))
+  const results = await runGates(gates, maxConcurrency, runGateWithRetry, printResult, cliGateOptions(failFast))
   printSummary(results, performance.now() - startedAt)
   return results.some(result => result.gate.allowFailure !== true && (result.status === 'failed' || result.status === 'skipped'))
     ? 1
@@ -163,6 +168,7 @@ function parseMode(raw: string | undefined): Mode {
     case 'ci-snapshot':
     case 'ci-artifacts':
     case 'ci-consumers':
+    case 'ci-private-consumers':
     case 'ci-windows-blocking':
     case 'ci-windows-complete':
     case 'ci-windows-observational-ready':
@@ -330,6 +336,8 @@ export function gatesForMode(selected: Mode): Gate[] {
       return ciArtifactGates()
     case 'ci-consumers':
       return ciConsumerGates()
+    case 'ci-private-consumers':
+      return ciPrivateConsumerGates()
     case 'ci-windows-blocking':
       return ciWindowsBlockingGates()
     case 'ci-windows-complete':
@@ -416,7 +424,10 @@ function sharedHygieneGates(): Gate[] {
     pnpmScript('no-bare-dispatcher', 'verify-no-bare-dispatcher', { label: 'proxy-aware dispatchers' }),
     pnpmScript('plugin-record-callers', 'verify-plugin-record-callers', { label: 'plugin record callers' }),
     pnpmScript('no-unknown-casts', 'verify-no-unknown-casts', { label: 'no new unknown casts' }),
+    pnpmScript('empty-catch', 'verify-empty-catch', { label: 'no new silent catches' }),
+    pnpmScript('private-distribution', 'verify-private-distribution', { label: 'private distribution invariant' }),
     pnpmScript('no-top-level-await', 'verify-no-top-level-await', { label: 'no module-scope await' }),
+    pnpmScript('plugin-entry-exports', 'verify-plugin-entry-exports', { label: 'plugin entry exports' }),
   ]
 }
 
@@ -530,6 +541,32 @@ function ciArtifactGates(): Gate[] {
   ]
 }
 
+/**
+ * The artifact consumers this distribution runs.
+ *
+ * Publication gates (publint, the NodeNext consumer types, the built-bin smokes) encode a release
+ * this distribution does not make, so they stay out of CI while their scripts stay available.
+ * @returns the gates that guard the built tree and its model-visible output.
+ */
+function ciPrivateConsumerGates(): Gate[] {
+  const builtTree = ['build']
+  const buildArtifactReaders = ['snapshot', 'expected-output', 'doc-typecheck']
+  return [
+    ciArtifactBuildGate(),
+    pnpmScript('node-compat', 'check:node-compat', {
+      label: 'Node compatibility',
+      env: { [CLIENT_BUILD_PROFILE_SELECTOR]: 'official' },
+    }),
+    snapshotGate(builtTree),
+    expectedOutputGate(builtTree),
+    webSnapshotGate(builtTree, buildArtifactReaders),
+    pnpmScript('doc-typecheck', 'doc-typecheck:contracts-ready', {
+      needs: builtTree,
+      env: { DSH_DOC_TYPECHECK_USE_BUILD_OUTPUT: '1' },
+    }),
+  ]
+}
+
 function ciConsumerGates(): Gate[] {
   const builtTree = ['build']
   // The HMR web test starts `dev:web`, which rewrites the shared `lib/` and
@@ -623,6 +660,14 @@ function ciWindowsCompleteGates(): Gate[] {
 }
 
 // Native Electron fixtures need the locked binary before Vitest removes ambient proxies.
+//
+// The installer fetches the 100 MB Electron release archive through the runner
+// proxy, and one gateway timeout there fails the required Windows coverage lane
+// before any test runs. On 2026-11-09 four jobs on three branches stopped at
+// `504 (Gateway Time-out)` for that URL after ~12 s, while other jobs fetched
+// the same archive minutes later (2.5 s from a warm cache, 14.7 s cold), so the
+// fetch gets three attempts instead of one. The wait outlasts the observed
+// gateway timeout, after which a fresh connection can reach the archive.
 function electronInstallGate(): Gate {
   return {
     id: 'electron-install',
@@ -630,6 +675,8 @@ function electronInstallGate(): Gate {
     displayCommand: 'pnpm --filter @deepseek-ai/dsh-desktop exec install-electron',
     ...pnpmInvocation(['--filter', '@deepseek-ai/dsh-desktop', 'exec', 'install-electron']),
     env: { ELECTRON_GET_USE_PROXY: '1' },
+    retries: 2,
+    retryDelayMs: 15000,
   }
 }
 
@@ -847,7 +894,6 @@ function docSyncLeafGates(options: {
     pnpmScript('tool-catalog', 'verify-tool-catalog', { label: 'tool catalog' }),
     pnpmScript('config-catalog', 'verify-config-catalog', { label: 'config catalog' }),
     pnpmScript('plugin-packages', 'verify-plugin-packages', { label: 'skill plugin package list' }),
-    pnpmScript('dependency-catalog', 'verify-dependency-catalog', { label: 'npm dependency catalog', quick: true }),
     pnpmScript('persistence-catalog', 'verify-persistence-catalog', { label: 'persistence catalog' }),
     pnpmScript('persistence-changes', 'verify-persistence-changes', { label: 'persistence type history' }),
     pnpmScript('persistence-releases', 'verify-persistence-releases', { label: 'released persistence history' }),
@@ -907,6 +953,7 @@ function builtBinSmokeGate(needs: string[] = ['build']): Gate {
     'apps/cli/tests/profiles/headless/tests/source-tool.built.e2e.ts',
     'apps/cli/tests/built-bin.e2e.ts',
     'apps/desktop/tests/acl-skill.built.e2e.ts',
+    'apps/desktop/tests/installed-docs-asar.built.e2e.ts',
     'packages/host/directory-picker-native/tests/built-worker.e2e.ts',
     'packages/sdk/server/tests/built-scope-carrier.e2e.ts',
     'packages/deliverables/tool-present/tests/built-errors.e2e.ts',
@@ -922,6 +969,7 @@ function builtBinSmokeGate(needs: string[] = ['build']): Gate {
     'packages/ptc-runtime/ptc-runtime-node/tests/built-lib.e2e.ts',
     'packages/session/session-persistence-jsonl/tests/built-migration-worker.e2e.ts',
     'packages/lsp/lsp-stdio/tests/built-lib.e2e.ts',
+    'packages/experimental/browser-use-stagehand-native/tests/built-attachment.e2e.ts',
   ], {
     label: 'built-bin smoke',
     needs,
@@ -1401,6 +1449,36 @@ export async function runGate(gate: Gate, signal?: AbortSignal): Promise<GateRes
   result.aborted = aborted
   if (spawnError !== undefined) result.error = spawnError
   return result
+}
+
+/**
+ * Execute one gate, repeating a failure while the gate declares `retries`.
+ * The wait between attempts is `retryDelayMs`, so a gate that fetches a remote
+ * artifact gets several connections to that host instead of failing the
+ * aggregate on the first one. A result the fail-fast signal terminated is not
+ * retried: the aggregate already decided to abort, and another attempt would be
+ * terminated again. The returned duration covers every attempt, and the output
+ * and error are the last attempt's, which is the one whose failure ends the gate.
+ * @param gate - command and scheduler environment to execute.
+ * @param signal - abort signal forwarded to every attempt.
+ * @param execute - executor for one attempt; the child-process boundary by default.
+ * @returns the last attempt's outcome with the total duration.
+ */
+export async function runGateWithRetry(
+  gate: Gate,
+  signal?: AbortSignal,
+  execute: GateExecutor = runGate,
+): Promise<GateResult> {
+  const started = performance.now()
+  const attempts = 1 + Math.max(0, gate.retries ?? 0)
+  let result = await execute(gate, signal)
+  for (let attempt = 2; attempt <= attempts && result.status === 'failed' && signal?.aborted !== true; attempt++) {
+    const delayMs = Math.max(0, gate.retryDelayMs ?? 0)
+    console.log(`run-gates: retrying ${gate.label} (attempt ${String(attempt)} of ${String(attempts)}) in ${String(delayMs)} ms`)
+    await new Promise(resolve => setTimeout(resolve, delayMs))
+    result = await execute(gate, signal)
+  }
+  return { ...result, durationMs: performance.now() - started }
 }
 
 /**

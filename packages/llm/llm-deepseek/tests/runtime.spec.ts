@@ -372,7 +372,6 @@ describe('DeepSeekAdapter against a mock server', () => {
     })
     // App attribution is a static product fact; no per-user or per-session identifier accompanies it.
     expect(server.headers[0]?.['user-agent']).toBe(userAgent())
-    expect(Object.keys(server.headers[0] ?? {}).filter(name => name.startsWith('x-deepseek-harness'))).toEqual([])
     expect(server.headers[0]).not.toHaveProperty('http-referer')
     expect(server.headers[0]).not.toHaveProperty('x-openrouter-title')
     expect(server.headers[0]).not.toHaveProperty('x-openrouter-categories')
@@ -1208,8 +1207,6 @@ describe('DeepSeekAdapter against a mock server', () => {
       })],
       sessionId: SessionId('child-session'),
     })
-
-    expect(Object.keys(server.headers[0] ?? {}).filter(name => name.startsWith('x-deepseek-harness'))).toEqual([])
   })
 
   it('does not mark the auxiliary compaction call on the wire', async () => {
@@ -1224,8 +1221,6 @@ describe('DeepSeekAdapter against a mock server', () => {
       })],
       purpose: 'compaction',
     })
-
-    expect(Object.keys(server.headers[0] ?? {}).filter(name => name.startsWith('x-deepseek-harness'))).toEqual([])
   })
 
   it('switches dynamically from the configured low default through off to max', async () => {

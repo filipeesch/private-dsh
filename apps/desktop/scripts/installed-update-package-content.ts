@@ -38,8 +38,8 @@ export async function verifyInstalledUpdatePackageContent(manifest: string, vers
   const metadata = object(await archive.readJson('package.json'))
   if (metadata.name !== `dsh-update-test-${run.id}` || metadata.version !== version
     || metadata.dshDesktopAppId !== run.appId || metadata.main !== 'qualification-bootstrap.mjs'
-    || metadata.type !== 'module') {
-    throw new Error('installed update: packaged application identity, version, or entry differs')
+    || metadata.type !== 'module' || metadata.dshMandatoryUpdatePolicy !== undefined) {
+    throw new Error('installed update: packaged application identity, version, entry, or policy differs')
   }
   const inventory = JSON.parse(await readFile(join(run.root, 'application/result.json'), 'utf8')) as {
     files: { path: string; sha256: string }[]

@@ -13,6 +13,7 @@ import * as desktopOffice from './office.ts'
 import { localDragResource } from './file-drag.ts'
 
 import { installDesktopUpdateTaskControl } from './update-tasks.ts'
+import * as DesktopAuthentication from '@deepseek-ai/dsh-host-authentication-desktop'
 import { installDesktopQuitInspection } from './quit-inspection.ts'
 import { installOfficeEngineResolution } from './office-engine.ts'
 import { installOperationDiagnostics } from './operation-diagnostics.ts'
@@ -134,8 +135,18 @@ async function main(): Promise<void> {
     source: process.argv[4] ?? join(runtimeDir, '..', 'runtime', 'primary-runtime'),
     root: join(resolveDshHome(), 'dsh-runtimes', 'dsh-primary-runtime'),
   })
-  const url = ctx.connection.authenticatedUrl(`${ctx.webServer.protocol}//127.0.0.1:${String(ctx.webServer.port)}`)
-  if (process.connected) process.send?.({ type: 'ready', url, injections: ctx.webServer.collectIndexInjections(ctx.connection.browserPeer) }, (error) => { if (error !== null) console.error(error) })
+  const secret = randomUUID()
+  const authenticationCookie = `dsh-desktop-session=${secret}`
+  await ctx.plugin(DesktopAuthentication, { readSecret: () => secret }).await()
+  const admission = ctx.connection.authentication.authenticate({ headers: { cookie: authenticationCookie } })
+  if ('rejection' in admission) throw new Error('Desktop authentication provider did not accept its startup credential')
+  const url = `${ctx.webServer.protocol}//127.0.0.1:${String(ctx.webServer.port)}/`
+  if (process.connected) process.send?.({
+    type: 'ready',
+    url,
+    authenticationCookie,
+    injections: ctx.webServer.collectIndexInjections(ctx.connection.browserPeer),
+  }, (error) => { if (error !== null) console.error(error) })
 }
 
 if (import.meta.main) {

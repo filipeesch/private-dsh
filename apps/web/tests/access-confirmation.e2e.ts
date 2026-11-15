@@ -247,7 +247,9 @@ describe('web e2e: experimental Auto and Full access confirmation', () => {
     await input.press('Enter')
     const slash = page.locator('[aria-label="/permission 选项"]')
     await slash.waitFor()
-    expect(await slash.getByRole('option').count()).toBe(4)
+    // The picker re-reads its catalog after every reload, so the option list settles a beat after
+    // the menu mounts; polling keeps a slow runner from reading the previous list.
+    await expect.poll(() => slash.getByRole('option').count()).toBe(4)
     const entry = [...scaffold.ctx.loader.entries()].find(row => row.options.id === 'auto-review')
     if (entry === undefined) throw new Error('experimental Auto integration is absent')
     await entry.update({ disabled: true })
@@ -257,8 +259,8 @@ describe('web e2e: experimental Auto and Full access confirmation', () => {
     expect(await input.textContent()).toBe('/permission')
     await input.press('Enter')
     await slash.waitFor()
-    expect(await slash.getByRole('option').count()).toBe(3)
-    expect(await slash.getByText('自动审查', { exact: true }).count()).toBe(0)
+    await expect.poll(() => slash.getByRole('option').count()).toBe(3)
+    await expect.poll(() => slash.getByText('自动审查', { exact: true }).count()).toBe(0)
     await page.keyboard.press('Escape')
     await access.click()
     await expect.poll(() => page.getByRole('menuitem').allTextContents())

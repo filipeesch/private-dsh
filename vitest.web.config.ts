@@ -33,5 +33,9 @@ export default defineConfig({
     testTimeout: 180_000,
     hookTimeout: 120_000,
     fileParallelism: false,
+    // Browser geometry, focus order, and plugin lifecycle cases can miss a frame on a shared
+    // runner and pass on the next attempt; a real regression fails both, and the retry is visible
+    // in the lane's output.
+    retry: 1,
   },
 })

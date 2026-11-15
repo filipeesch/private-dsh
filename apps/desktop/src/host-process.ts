@@ -10,6 +10,8 @@ interface ReadyEvent {
   readonly type: 'ready'
   readonly url: string
   readonly injections?: readonly unknown[] | undefined
+  /** Desktop session cookie minted by the Host for this owned parent process. */
+  readonly authenticationCookie?: string | undefined
 }
 
 interface FatalEvent {
@@ -65,6 +67,7 @@ function isDesktopHostEvent(message: unknown): message is DesktopHostEvent {
       return true
     case 'ready':
       return typeof candidate.url === 'string'
+        && (candidate.authenticationCookie === undefined || typeof candidate.authenticationCookie === 'string')
     case 'fatal':
       return typeof candidate.message === 'string' && (candidate.diagnostic === undefined || typeof candidate.diagnostic === 'string')
     case 'update-tasks':
@@ -102,6 +105,8 @@ async function exitsWithin(exit: Promise<void>, milliseconds: number): Promise<b
 export interface DesktopHostReady {
   readonly url: string
   readonly injections?: readonly unknown[] | undefined
+  /** Desktop session cookie the Host minted for this owned parent process. */
+  readonly authenticationCookie?: string | undefined
 }
 
 /** The child has exited, but task teardown did not finish successfully. */
@@ -217,7 +222,13 @@ export class DesktopHostProcess {
         return
       }
       if (message.type === 'starting') this.runId = message.runId
-      else if (message.type === 'ready') this.readyResolve({ url: message.url, injections: message.injections })
+      else if (message.type === 'ready') {
+        this.readyResolve({
+          url: message.url,
+          injections: message.injections,
+          ...message.authenticationCookie === undefined ? {} : { authenticationCookie: message.authenticationCookie },
+        })
+      }
       else if (message.type === 'shutdown-complete') {
         if (this.stopping) this.shutdownCompleted = true
         else this.fail(new Error('dsh desktop host acknowledged an unrequested shutdown'))

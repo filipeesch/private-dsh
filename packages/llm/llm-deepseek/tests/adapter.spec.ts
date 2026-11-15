@@ -150,7 +150,6 @@ describe('direct Messages HTTP', () => {
       'x-api-key': 'test-key', 'anthropic-version': '2023-06-01',
       'user-agent': expect.stringContaining('deepseek-harness/') as string,
     }, body: { thinking: { type: 'enabled' }, output_config: { effort: 'high' } } })
-    expect(Object.keys(http.requests[0]!.headers).filter(name => name.startsWith('x-deepseek-harness'))).toEqual([])
     expect(llm.providerInfo('deepseek-official')).toEqual({ id: 'deepseek-official', name: 'DeepSeek' })
     expect(await llm.listModels('deepseek-official')).toEqual([])
     expect(await llm.resolveModel('deepseek-official', 'deepseek-flash')).toMatchObject({

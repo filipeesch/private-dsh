@@ -79,6 +79,10 @@ jobs:
           bubblewrap: 'true'
       - name: Build the native system addon
         run: pnpm run build:native-system
+      # Specs that boot a Cordis composition import plugin packages through Node's resolver, so the
+      # vendored libraries must exist as built artifacts; a clean checkout has no `lib/` yet.
+      - name: Build the vendored libraries
+        run: pnpm run build:artifacts
       - name: Run unit tests
         run: pnpm exec vitest run --shard=${{ matrix.shard }}/4
 
@@ -102,7 +106,7 @@ jobs:
       - name: Install Playwright Chromium, WebKit and system dependencies
         run: pnpm --filter @deepseek-ai/dsh-web-frontend exec playwright install --with-deps chromium webkit
       - name: Run compatibility, snapshot and artifact gates
-        run: pnpm run check:ci:consumers
+        run: pnpm run check:ci:private:consumers
       # build:artifacts is the producer; build:check type-checks tests and scripts against its output.
       - name: Check tests and scripts against the build output
         run: pnpm run build:check
