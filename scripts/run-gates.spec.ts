@@ -366,10 +366,10 @@ describe('gate graph validation', () => {
     expect(quick).toEqual(full.filter(gate => gate.quick === true))
   })
 
-  it('checks the recorded npm dependency catalog in both documentation aggregates', () => {
-    for (const mode of ['doc-sync', 'doc-quick'] as const) {
-      expect(withPnpmEntrypoint(() => gatesForMode(mode).find(gate => gate.id === 'dependency-catalog')))
-        .toMatchObject({ args: ['/private/pnpm.cjs', 'run', 'verify-dependency-catalog'] })
+  it('checks the private distribution invariant in the static aggregates', () => {
+    for (const mode of ['ci-static', 'hygiene'] as const) {
+      expect(withPnpmEntrypoint(() => gatesForMode(mode).find(gate => gate.id === 'private-distribution')))
+        .toMatchObject({ args: ['/private/pnpm.cjs', 'run', 'verify-private-distribution'] })
     }
   })
 
@@ -380,7 +380,7 @@ describe('gate graph validation', () => {
       'rescope-vendor', 'publint', 'constraints', 'default-product-isolation', 'product-use', 'official-bundle-catalog', 'provider-data', 'package-dependencies', 'application-entrypoints',
       'dsh-package-licenses', 'node-next-types',
       'optional-dependency-imports', 'client-packages', 'installer-locales', 'locale-metadata', 'client-ui-i18n', 'client-route-resolution', 'no-bare-dispatcher',
-      'plugin-record-callers', 'no-unknown-casts', 'no-top-level-await',
+      'plugin-record-callers', 'no-unknown-casts', 'private-distribution', 'no-top-level-await',
       'cordis-config', 'runtime-closure',
     ])
   })
