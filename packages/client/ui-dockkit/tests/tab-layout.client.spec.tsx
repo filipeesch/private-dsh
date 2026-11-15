@@ -377,3 +377,21 @@ it('places a selected tab\'s strip moved to another pane from that pane\'s last 
     restore()
   }
 })
+
+it('draws the docked tree only when dockOnly is set', () => {
+  const controller = seededController()
+  controller.setExpanded(true)
+  const first = getPane(controller.getSnapshot().state, controller.getSnapshot().state.rootId).tabs[0]!
+  const second = controller.openContent({ kind: 'file', contentId: 'file:b', title: 'B' })
+  controller.floatTab(second)
+  const h = mounted(controller, { keepMounted: () => true })
+  expect(h.view.container.querySelector('[data-dockkit-float]')).not.toBeNull()
+  expect(h.view.container.querySelector(`[data-body="${second}"]`)).not.toBeNull()
+  const docked = h.body(first)
+  h.redraw({ dockOnly: true })
+  expect(h.view.container.querySelector('[data-dockkit-float]')).toBeNull()
+  expect(h.view.container.querySelector(`[data-body="${second}"]`)).toBeNull()
+  expect(h.body(first)).toBe(docked)
+  h.redraw({ dockOnly: false })
+  expect(h.view.container.querySelector('[data-dockkit-float]')).not.toBeNull()
+})

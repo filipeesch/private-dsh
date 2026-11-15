@@ -3,11 +3,14 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/subsystems/sidebar-right.md
 /right-sidebar:
-  en: e84f3719f0a99a63
-  zh: 387656d860d3c2c4
+  en: 1cd0b1fe26abd1c5
+  zh: 61907ca8316deb70
 /right-sidebar/position-and-ownership:
-  en: 35e347438a6ea22f
-  zh: a33a57edd698a6ec
+  en: e8702574fb3e5228
+  zh: bed7671babd7d460
+/right-sidebar/embedded-occurrence:
+  en: 0faff17ac263b644
+  zh: 73d08179150a4e63
 /right-sidebar/addresses:
   en: 465f0c330fc1054b
   zh: bd0b68a05790fff8
@@ -15,11 +18,11 @@
   en: b7b8a7b411aee94d
   zh: 7298c20000945d97
 /right-sidebar/navigation-ctx-sidebarright:
-  en: 2a2b3a33df9e0749
-  zh: 629c791cd2ae50ba
+  en: ada111e7b34ebdfe
+  zh: 3bd275f3f70088ed
 /right-sidebar/slots-and-owner-props:
-  en: 6b5faaed58ab5fb1
-  zh: 2118439d3403a735
+  en: 6a364f787cf8ee86
+  zh: e13a97a33e0009f3
 /right-sidebar/document-renderers:
   en: 2bf47a890fce175e
   zh: 45f81c579b8939a8
@@ -33,5 +36,5 @@
   en: f8f0e368701f6669
   zh: de364aaf3345d70c
 /right-sidebar/not-built:
-  en: 5cf5ab52c8007897
-  zh: 346490f01e318d95
+  en: 56a641d1cc3e52b7
+  zh: a07b3670f0389815

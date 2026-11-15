@@ -315,7 +315,15 @@ export function DockSurface(props: DockSurfaceProps): ReactNode {
 }
 
 /** Horizontal Sidebar layout with stable tab containers across docking and floating. */
-export type DockLayoutProps = DockSurfaceProps & TabRetention
+export type DockLayoutProps = DockSurfaceProps & TabRetention & {
+  /**
+   * Render the docked tree only, leaving every floating record in the layout
+   * without a host of its own. Another occurrence of the same layout draws the
+   * floating panes; this one must neither duplicate their bodies nor place
+   * fixed panels inside a host surface.
+   */
+  readonly dockOnly?: boolean
+}
 
 /**
  * Render one pane or two horizontal panes, and their floats, in one stable content tree.

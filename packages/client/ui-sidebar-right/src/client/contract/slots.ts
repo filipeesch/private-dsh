@@ -20,7 +20,9 @@
  * registering into one already depends on it for the declaration. The types
  * therefore live with their declarer.
  */
+import type { ContextMenuTarget } from '@deepseek-ai/dsh-client-ui-context-menu/client'
 import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/client'
+import type { FactoryComponentPropsOf, HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import type { RightbarOwnerProps } from '@deepseek-ai/dsh-client-ui-layout/client'
 // The locale plugin's own merge carries the shared `common` vocabulary that the
@@ -30,6 +32,10 @@ import type { PaneId, TabId, TabRecord } from '@deepseek-ai/dsh-client-ui-dockki
 import type { SlotHookFactory } from '@deepseek-ai/dsh-client-ui-slots'
 import type { TabHookContext } from '../tab-info.ts'
 import type { SidebarRightKey } from '../locales.ts'
+import type { SidebarRightFlash, SidebarRightOpenTabOptions } from '../service.ts'
+import type { createSidebarRightStore } from '../stores.ts'
+import type { TabOccurrence } from '../tab-domain.ts'
+import type { SidebarRightTabDefinition } from '../tab-registry.ts'
 import type { SidebarRightNavigationParams, SidebarRightResourceParams, SidebarRightTabParamsFor } from './params.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -104,7 +110,82 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      */
     'sidebar.right.tab.menu.item': { kind: 'list'; scope: 'session'; owner: SidebarRightTabMenuOwnerProps }
   }
+
+  interface SlotFactoryMap {
+    /**
+     * The right Sidebar panel for one Session: its tabs, its panes, and every
+     * tab body. A host renders one occurrence for the Session area it provides.
+     * The frame's right column renders the `main` variant; any other surface
+     * renders `embedded` and owns its geometry, so an embedded occurrence
+     * opens no frame track and reports no frame fullscreen.
+     *
+     * Both variants share the Session's store, and therefore its layout, its
+     * open tabs, and its persisted `dsh.sidebar-right.v1.<sessionId>` entry.
+     */
+    'sidebar.right.panel': {
+      scope: 'session'
+      props: SidebarRightPanelInputProps
+      children: {
+        'sidebar.right.pane.tab': { kind: 'keyed'; scope: 'session'; inject: SidebarRightTabInjected }
+        'sidebar.right.pane.tab.title': { kind: 'keyed'; scope: 'session'; inject: SidebarRightTabInjected }
+      }
+      store: ReturnType<typeof createSidebarRightStore>
+      locale: 'sidebarRight'
+      inject: SidebarRightPanelInjected
+    }
+  }
 }
+
+/** Caller-owned inputs of one panel occurrence. */
+export interface SidebarRightPanelInputProps {
+  /** `main` renders in the frame's right column; `embedded` fills the box its host provides. */
+  readonly variant: 'main' | 'embedded'
+  /** `main` only: the frame presents the panel fullscreen. Embedded occurrences always draw docked. */
+  readonly fullscreen?: boolean
+  /** Whether this occurrence is on screen; defaults to `true`. */
+  readonly active?: boolean
+  /** `main` only: the column width the panel keeps while collapsed. Embedded occurrences fill their container. */
+  readonly width?: number
+  /**
+   * `keepMounted` lease. The frame occurrence passes its View-backed lease;
+   * an embedded occurrence omits it and gets a local lease that owns no
+   * Session reference, because its host already retains that Session.
+   */
+  readonly retainTab?: (tabId: TabId, signal: AbortSignal) => () => void
+}
+
+/** Business callbacks every panel occurrence consumes. */
+export interface SidebarRightPanelInjected {
+  /** The navigation face's `openTab`, for the strip's add control. */
+  readonly openTab: (kind: string, options?: SidebarRightOpenTabOptions) => void
+  /** Close through the resource owner's cleanup handler. */
+  readonly closeTab: (tabId: TabId) => void
+  /** Split through the same controller as keyboard commands; a no-op outside the frame occurrence. */
+  readonly splitPane: (paneId: PaneId) => void
+  /** Toggle the panel's display mode through its chrome button. */
+  readonly toggleFullscreen: () => void
+  /** Record the room rule this occurrence measured, replacing its previous one. */
+  readonly measureRoom: (canSplitPane: (paneId: PaneId) => boolean) => void
+  /** Report this embedded occurrence as the Sidebar's navigation target; returns the release. */
+  readonly enterEmbedded: () => () => void
+  /** Take an expansion recorded before this Session's panel existed. */
+  readonly takePendingExpansion: () => boolean | undefined
+  readonly hooks: {
+    readonly contextMenuTarget: HostObservable<ContextMenuTarget | null>
+    readonly shortcuts: HostObservable<readonly ShortcutCatalogEntry[]>
+    readonly tabTypes: HostObservable<readonly SidebarRightTabDefinition[]>
+    /** This Session's latest request to make the pane holding a revealed tab glow. */
+    readonly flash: HostObservable<SidebarRightFlash | undefined>
+  }
+  readonly keyedHooks: {
+    readonly tabNavigation: (key: string) => HostObservable<SidebarRightTabNavigation>
+  }
+  /** Read a committed record's lifetime; never creates an occurrence. */
+  readonly occurrence: (tab: Pick<TabRecord, 'id'>) => TabOccurrence
+}
+
+/** Full props of one panel occurrence. */
+export type SidebarRightPanelProps = FactoryComponentPropsOf<'sidebar.right.panel'>
 
 /** Where a tab was last navigated to: what the `open` that created or revealed it carried. */
 export interface SidebarRightTabNavigation {

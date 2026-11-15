@@ -18,7 +18,9 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { Shortcuts, ShortcutCommand } from '@deepseek-ai/dsh-client-shortcuts/client'
 import { TabMenuContent } from '../src/client/shell/TabMenuContent.tsx'
 import { apply, inject } from '../src/client/index.ts'
-import type { GuideInjected, SidebarRightInjected } from '../src/client/index.ts'
+import type {
+  GuideInjected, SidebarRightFrameInjected, SidebarRightPanelInjected,
+} from '../src/client/index.ts'
 import { apply as hostApply } from '../src/index.ts'
 import { SidebarRightController } from '../src/client/service.ts'
 import { SidebarRightTabRegistry } from '../src/client/tab-registry.ts'
@@ -42,19 +44,30 @@ interface Recorded {
   locale?: string
   store?: unknown
   children?: unknown
-  inject?: (sessionId: SessionId) => unknown
+  inject?: (sessionId?: SessionId) => unknown
   component: unknown
+}
+
+interface RecordedFactory extends Recorded {
+  scope: string
+  slots?: unknown
 }
 
 async function boot(shortcuts: Partial<Shortcuts> = {}) {
   const ctx = new Context()
   const registered: Recorded[] = []
+  const factories: RecordedFactory[] = []
   const slots = {
     inject: vi.fn((_name: string, register: Parameters<SlotRegistry['inject']>[1]) => ctx.effect(register)),
     register: vi.fn((options: Omit<Recorded, 'component'>, component: unknown) => {
       const entry: Recorded = { ...options, component }
       registered.push(entry)
       return () => { registered.splice(registered.indexOf(entry), 1) }
+    }),
+    registerFactory: vi.fn((options: Omit<RecordedFactory, 'component'>, component: unknown) => {
+      const definition: RecordedFactory = { ...options, component }
+      factories.push(definition)
+      return () => { factories.splice(factories.indexOf(definition), 1) }
     }),
     entriesOfSlot: vi.fn((name: string) => registered.filter(entry => entry.name === name)),
     subscribe: vi.fn((_name: string, _listener: () => void) => () => {}),
@@ -96,7 +109,19 @@ async function boot(shortcuts: Partial<Shortcuts> = {}) {
     if (entry.inject === undefined) throw new Error(`expected ${entry.name} to inject`)
     return entry.inject(SESSION)
   }
-  return { ctx, menus, slots, registered, dictionaries, layout, current, resources, fiber, seat, injectedOf }
+  const factory = (): RecordedFactory => {
+    const definition = factories.find(candidate => candidate.name === 'sidebar.right.panel')
+    if (definition === undefined) throw new Error('expected the panel Factory registration')
+    return definition
+  }
+  const panelInjected = (): SidebarRightPanelInjected => {
+    const definition = factory()
+    if (definition.inject === undefined) throw new Error('expected the panel Factory to inject')
+    return definition.inject(SESSION) as SidebarRightPanelInjected
+  }
+  return {
+    ctx, menus, slots, registered, factories, dictionaries, layout, current, resources, fiber, seat, factory, panelInjected, injectedOf,
+  }
 }
 
 describe('ui-sidebar-right apply', () => {
@@ -126,7 +151,7 @@ describe('ui-sidebar-right apply', () => {
   })
 
   it('provides both faces, and registers the guide through the same two-stage path as any other type', async () => {
-    const { ctx, registered, dictionaries, seat } = await boot()
+    const { ctx, registered, dictionaries, seat, factory } = await boot()
     expect(ctx.sidebarRightTabs).toBeInstanceOf(SidebarRightTabRegistry)
     expect(ctx.sidebarRight).toBeInstanceOf(SidebarRightController)
     expect('adopt' in ctx.sidebarRight).toBe(false)
@@ -140,19 +165,23 @@ describe('ui-sidebar-right apply', () => {
       ['contextMenu.icon', 'sidebar.close', undefined, IconCloseOutlineRegular],
       ['contextMenu.content', 'tab', undefined, TabMenuContent],
       ['rightbar', undefined, undefined, RightbarRoot],
-      ['rightbar.session', undefined, 'sidebarRight', RightbarSeat],
+      ['rightbar.session', undefined, undefined, RightbarSeat],
       ['conversation.session.header.corner', undefined, 'sidebarRight', ExpandButton],
       ['sidebar.right.pane.tab', GUIDE_ID, 'sidebarRight', GuideBody],
       ['sidebar.right.pane.tab.title', GUIDE_ID, undefined, GuideTitle],
     ])
-    // The panel declares the extension seats; the guide declares its chain child.
-    expect(Object.keys(seat('rightbar.session').children as object)).toEqual([
-      'sidebar.right.pane.tab', 'sidebar.right.pane.tab.title',
-    ])
+    // The Factory owns the panel's extension seats; the frame seat declares nothing.
+    const panel = factory()
+    expect(panel.scope).toBe('session')
+    expect(panel.locale).toBe('sidebarRight')
+    expect(Object.keys(panel.children as object)).toEqual(['sidebar.right.pane.tab', 'sidebar.right.pane.tab.title'])
+    expect(seat('rightbar.session').children).toBeUndefined()
     expect(seat('sidebar.right.pane.tab').children).toMatchObject({ 'sidebar.right.tab.guide': { kind: 'chain', scope: 'session' } })
-    // Both seats read one store: the button only needs to know whether the panel is expanded.
-    expect(seat('rightbar.session').store).toBeDefined()
+    // One store for the frame seat and the Factory: the header button shares it too.
+    expect(panel.store).toBe(seat('rightbar.session').store)
     expect(seat('conversation.session.header.corner').store).toBe(seat('rightbar.session').store)
+    // Hosts detect the embeddable surface through the service capability.
+    expect(ctx.sidebarRight.capabilities.embeddedPanel).toBe(true)
   })
 
   it('names the selected Session as on screen while the Conversation fills the main column', async () => {
@@ -168,19 +197,27 @@ describe('ui-sidebar-right apply', () => {
     expect(ctx.sidebarRight.mounted.getSnapshot()).toBeUndefined()
   })
 
-  it('hands the panel seat the frame report, the room rule, the opens, the observable registry, and the Tab domain', async () => {
-    const { ctx, layout, current, resources, seat, injectedOf } = await boot()
-    const injected = injectedOf(seat('rightbar.session')) as SidebarRightInjected
+  it('hands the frame its report and the panel its chrome callbacks, room rule, opens, and observables', async () => {
+    const { ctx, layout, current, resources, seat, injectedOf, panelInjected } = await boot()
+    const frame = injectedOf(seat('rightbar.session')) as SidebarRightFrameInjected
     // The frame learns the composition of expanded and presentation, nothing else.
-    injected.syncPresentation({ shown: true, track: true, fullscreen: false })
+    frame.syncPresentation({ shown: true, track: true, fullscreen: false })
     expect(layout.openRightbar).toHaveBeenLastCalledWith(true, false)
-    injected.syncPresentation({ shown: true, track: true, fullscreen: true })
+    frame.syncPresentation({ shown: true, track: true, fullscreen: true })
     expect(layout.openRightbar).toHaveBeenLastCalledWith(true, true)
-    injected.syncPresentation({ shown: true, track: false, fullscreen: true })
+    frame.syncPresentation({ shown: true, track: false, fullscreen: true })
     expect(layout.openRightbar).toHaveBeenLastCalledWith(false, true)
-    injected.syncPresentation({ shown: false, track: false, fullscreen: false })
+    frame.syncPresentation({ shown: false, track: false, fullscreen: false })
     expect(layout.closeRightbar).toHaveBeenCalledOnce()
-    // The registry, observable: what the seat dispatches a kind to.
+    const injected = panelInjected()
+    // The frame occurrence learns from the drawing ledger whether an embedded one has the bodies.
+    const drawing = frame.keyedHooks.drawnElsewhere(SESSION)
+    expect(drawing.getSnapshot()).toBe(0)
+    const leave = injected.enterEmbedded()
+    expect(drawing.getSnapshot()).toBe(1)
+    leave()
+    expect(drawing.getSnapshot()).toBe(0)
+    // The registry, observable: what the panel dispatches a kind to.
     expect(injected.hooks.tabTypes.getSnapshot().find(type => type.kind === 'guide')?.id).toBe(GUIDE_ID)
     const seen = vi.fn()
     const unsubscribe = injected.hooks.tabTypes.subscribe(seen)
@@ -217,7 +254,7 @@ describe('ui-sidebar-right apply', () => {
     const layoutOf = () => instance.getSnapshot().bySession[SESSION]?.layout
     injected.toggleFullscreen()
     expect(layoutOf()?.mode).toBe('fullscreen')
-    injected.reportAutoFullscreen(true)
+    frame.reportAutoFullscreen(true)
     injected.toggleFullscreen()
     expect(layoutOf()?.expanded).toBe(false)
     expect(layoutOf()?.mode).toBe('push')
@@ -324,8 +361,8 @@ describe('ui-sidebar-right apply', () => {
   })
 
   it('takes every registration and both faces back when disposed, aborting the open records, so a reload registers again', async () => {
-    const { ctx, registered, dictionaries, current, fiber, seat, injectedOf } = await boot()
-    const injected = injectedOf(seat('rightbar.session')) as SidebarRightInjected
+    const { ctx, registered, dictionaries, current, fiber, seat, panelInjected } = await boot()
+    const injected = panelInjected()
     const handle = seat('rightbar.session').store as ReturnType<typeof createSidebarRightStore>
     // Minted under the session key, so the instance is adopted and the teardown releases it.
     const instance = handle.create(SESSION)

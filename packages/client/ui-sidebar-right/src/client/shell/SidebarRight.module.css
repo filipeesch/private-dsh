@@ -290,3 +290,23 @@
     animation-timing-function: step-end;
   }
 }
+
+/* A host-provided box for the embedded occurrence: the panel fills it, and it
+   never slides, because the host owns how the panel appears. */
+.embeddedRoot {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.panelEmbedded {
+  width: 100%;
+}
+
+.panelEmbedded :global([data-dockkit-host='dock']),
+.panelEmbedded :global([data-dockkit-empty]),
+.panelEmbedded :global([data-dockkit-divider]) {
+  transform: none;
+  visibility: visible;
+}

@@ -65,8 +65,8 @@ it('pins restored records during adoption before the first render or store mutat
   const pin = vi.fn()
   const { controller, adopt } = createSidebarRightController(new SidebarRightTabRegistry(ctx), pin, {
     autoFullscreen: () => false,
-    openWithFocus: (_sessionId, open) => { open() },
-    closeWithFocus: (_sessionId, _paneId, close) => { close() },
+    openWithFocus: (_sessionId, _host, open) => { open() },
+    closeWithFocus: (_sessionId, _host, _paneId, close) => { close() },
   })
   expect(controller.tabsIn(sessionId)).toEqual([])
   const restored = createSidebarRightStore(seed).create(sessionId)

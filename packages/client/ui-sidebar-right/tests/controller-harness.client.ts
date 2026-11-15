@@ -27,11 +27,12 @@ export function controllerHarness() {
     title: address => address.slice(address.lastIndexOf('/') + 1),
   })
   const pin = vi.fn<(address: string, signal: AbortSignal) => void>()
-  const { controller, adopt, forget, show, measure } = createSidebarRightController(tabs, pin, {
-    autoFullscreen: () => false,
-    openWithFocus: (_sessionId, open) => { open() },
-    closeWithFocus: (_sessionId, _paneId, close) => { close() },
-  })
+  const { controller, adopt, forget, show, measure, enterEmbedded, takePendingExpansion, drawingSource, faces }
+    = createSidebarRightController(tabs, pin, {
+      autoFullscreen: () => false,
+      openWithFocus: (_sessionId, _host, open) => { open() },
+      closeWithFocus: (_sessionId, _host, _paneId, close) => { close() },
+    })
   const instance = createSidebarRightStore(() => ({ kind: 'guide', title: 'seed' })).create()
   const unadopt = adopt(SESSION, instance)
   const layout = (): LayoutState => {
@@ -57,5 +58,8 @@ export function controllerHarness() {
   }
   const entries = (): number => instance.getSnapshot().bySession[SESSION]?.history.entries.length ?? 0
   const expand = (): void => { instance.actions.setExpanded(SESSION, true) }
-  return { controller, adopt, unadopt, forget, show, measure, tabs, instance, pin, publish, titles, tabOf, layout, entries, room, expand }
+  return {
+    controller, adopt, unadopt, forget, show, measure, enterEmbedded, takePendingExpansion, drawingSource, faces,
+    tabs, instance, pin, publish, titles, tabOf, layout, entries, room, expand,
+  }
 }
