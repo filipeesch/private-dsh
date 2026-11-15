@@ -43,13 +43,13 @@ Rule 1 works from package identity (composition mounts, manifest dependencies, i
 
 ### Egress is a layer rule with a host allowlist inside the seams
 
-A package that is not declared as a transport seam may not import `node:net|http|https|tls|dns|http2` or call `fetch`. Inside a declared seam, a literal host must be recorded; an endpoint built from configuration needs no entry, which is why adding a model or search provider costs one policy line and no host registration. Literal hosts recorded today fall into four kinds, and the policy labels them: protocol namespaces that are never reached (`w3.org`, `json-schema.org`, `schemas.openxmlformats.org`), provider defaults (`api.deepseek.com`, `*.aliyuncs.com`), package and documentation metadata (`github.com`, registries), and test placeholders that appear in shipped strings (`*.invalid`, `example.com`).
+A package that is not declared as a transport seam may not import `node:net|http|https|tls|dns|http2` or call `fetch`. Inside a declared seam, a literal host must be recorded; an endpoint built from configuration needs no entry, which is why adding a model or search provider costs one policy line and no host registration. Literal hosts recorded today fall into five kinds, and the policy labels them: protocol namespaces that are never reached (`w3.org`, `json-schema.org`, `schemas.openxmlformats.org`), provider defaults (`api.deepseek.com`, `*.aliyuncs.com`), package and documentation metadata (`github.com`, registries), test placeholders that appear in shipped strings (`*.invalid`, `example.com`), and the desktop update origin the release tooling produces (`download.deepseek.com`).
 
 The alternative considered was an allowlist of hosts alone: it lists 364 entries, reports namespaces as violations, and misses a call site whose host comes from configuration. The layer rule is the stronger half and the one that encodes the invariant; the host list only protects the case of a new endpoint inside a seam that is already licensed.
 
 ### Fingerprint baseline over line numbers or file allowlists
 
-Recorded occurrences are keyed by a SHA-256 of syntax tokens, following `verify-no-unknown-casts`, so a moved occurrence stays accepted and an edited one is reported again. A line-number baseline churns on every reorder; a file allowlist would accept anything new inside an already-listed file. Each recorded entry carries the rule and a short reason so the diff of a `gen` run reads as a decision.
+Recorded occurrences are keyed by a SHA-256 of syntax tokens, following `verify-no-unknown-casts`, so a moved occurrence stays accepted and an edited one is reported again. A line-number baseline churns on every reorder; a file allowlist would accept anything new inside an already-listed file. Each recorded entry is a fingerprint over the rule and its evidence, so the entry itself names the rule and what it matched; the justification for accepting it is the seam entry or compatibility path that admits the file, and the recording command prints every added entry so its diff reads as a decision.
 
 ### Corpus with a guard
 
@@ -79,7 +79,7 @@ A single merge of `upstream/master` on the working branch, resolved manual by ar
 
 ## Risks / Trade-offs
 
-- **A recorded fingerprint masks a real regression** → each entry carries its rule and reason, the recording command prints the added entries, and the pull request shows the baseline diff. The baseline is reviewed like code.
+- **A recorded fingerprint masks a real regression** → the entry names its rule through the fingerprint, the recording command prints the added entries, and the pull request shows the baseline diff. The baseline is reviewed like code.
 - **The layer rule produces a large first baseline** (16 net-importing packages, 20 fetch callers) → the first recording is a review artifact of its own, with one reason per seam. Anything that cannot state a reason is not recorded, and stays a finding.
 - **The audit lands before a merge that touches its own corpus** → the merge will move session code and add packages, so some entries become stale and re-recording is expected. Fingerprints survive pure movement; only edited occurrences need re-recording.
 - **A strict egress rule blocks a legitimate new upstream feature** → the feature enters as a declared seam with one policy line, which is a deliberate review checkpoint rather than a wall. The cost of adding a provider is the provider package, its configuration, and one line.

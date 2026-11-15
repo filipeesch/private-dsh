@@ -5,7 +5,40 @@ import type { CorpusFile } from '../corpus.ts'
 import type { PrivateDistributionPolicy, TransportSeam } from '../policy.ts'
 import type { Finding } from '../scan.ts'
 
-const NETWORK_MODULES = new Set(['node:net', 'node:http', 'node:https', 'node:tls', 'node:dns', 'node:http2'])
+/** Modules that open a socket, listen, or resolve a host, including their subpath entries. */
+const NETWORK_MODULES = ['node:net', 'node:http', 'node:https', 'node:tls', 'node:dns', 'node:http2'] as const
+/** Browser globals that reach the network without `fetch`. */
+const NETWORK_GLOBALS = new Set(['WebSocket', 'EventSource', 'XMLHttpRequest'])
+
+function isNetworkModule(specifier: string): boolean {
+  return NETWORK_MODULES.some(name => specifier === name || specifier.startsWith(`${name}/`))
+}
+
+/** A call to the global `fetch`; a `.fetch` method on a service is that seam's own API. */
+function isFetchCall(node: ts.CallExpression): boolean {
+  if (ts.isIdentifier(node.expression)) return node.expression.text === 'fetch'
+  if (!ts.isPropertyAccessExpression(node.expression) || node.expression.name.text !== 'fetch') return false
+  const base = node.expression.expression.getText()
+  return base === 'globalThis' || base === 'window' || base === 'self' || base === 'globalThis.window'
+}
+
+function isNetworkConstructor(node: ts.NewExpression, source: ts.SourceFile): boolean {
+  const text = node.expression.getText(source)
+  return NETWORK_GLOBALS.has(text) || text === 'globalThis.WebSocket'
+}
+
+function literalModuleSpecifier(node: ts.Node): string | undefined {
+  if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+    const specifier = node.moduleSpecifier
+    return specifier !== undefined && ts.isStringLiteralLike(specifier) ? specifier.text : undefined
+  }
+  if (!ts.isCallExpression(node)) return undefined
+  const dynamic = node.expression.kind === ts.SyntaxKind.ImportKeyword
+  const required = ts.isIdentifier(node.expression) && node.expression.text === 'require'
+  const [argument] = node.arguments
+  if ((dynamic || required) && argument !== undefined && ts.isStringLiteralLike(argument)) return argument.text
+  return undefined
+}
 const HOST = /https?:\/\/([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/gu
 
 function seamFor(path: string, policy: PrivateDistributionPolicy): TransportSeam | undefined {
@@ -35,14 +68,15 @@ function egressFindings(file: CorpusFile): Finding[] {
     })
   }
   const visit = (node: ts.Node): void => {
-    const moduleSpecifier = ts.isImportDeclaration(node) && ts.isStringLiteralLike(node.moduleSpecifier)
-      ? node.moduleSpecifier.text
-      : undefined
-    if (moduleSpecifier !== undefined && NETWORK_MODULES.has(moduleSpecifier)) {
+    const moduleSpecifier = literalModuleSpecifier(node)
+    if (moduleSpecifier !== undefined && isNetworkModule(moduleSpecifier)) {
       report(`imports ${moduleSpecifier} outside a declared transport seam`, node.getStart(source))
     }
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'fetch') {
+    if (ts.isCallExpression(node) && isFetchCall(node)) {
       report('calls fetch outside a declared transport seam', node.getStart(source))
+    }
+    if (ts.isNewExpression(node) && isNetworkConstructor(node, source)) {
+      report('opens a network connection outside a declared transport seam', node.getStart(source))
     }
     ts.forEachChild(node, visit)
   }

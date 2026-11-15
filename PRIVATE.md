@@ -6,15 +6,17 @@ This file is for maintainers. It states the invariant, points at the one place t
 
 ## The policy is declared once
 
-[scripts/private-distribution/policy.ts](scripts/private-distribution/policy.ts) is the only declaration of what this distribution removes and where network egress is allowed. It holds five lists:
+[scripts/private-distribution/policy.ts](scripts/private-distribution/policy.ts) is the only declaration of what this distribution removes and where network egress is allowed. It holds seven lists:
 
 - **Removed packages.** Packages this distribution does not ship, each with the surface it carried.
 - **Retired identifiers.** Names that disappeared with those surfaces.
 - **Transport seams.** Packages allowed to start network egress, each with a reason. A provider's endpoint comes from configuration, so adding a provider costs its package plus one seam entry here — not a host registration.
-- **Recorded literal hosts.** Hostnames that appear in code inside a seam, grouped by what they identify: protocol namespace, test placeholder, model provider, package metadata, or removed surface.
+- **Recorded literal hosts.** Hostnames that appear in code inside a seam, grouped by what they identify: protocol namespace, test placeholder, model provider, package metadata, or desktop update origin.
 - **Compatibility paths.** Session reader and migration paths that must keep naming retired producers so old Sessions still load.
+- **Corpus roots.** The directories the audit reads: `packages`, `apps`, `native`, and `scripts`.
+- **Excluded paths.** The audit's own declaration and its records, which name every removed package by definition.
 
-Nothing else in the repository restates those lists. Prose describes them; the module declares them.
+Generated catalogs and package lists derive from the workspace manifests, never from these lists.
 
 ## What the audit enforces
 

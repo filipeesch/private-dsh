@@ -1,4 +1,4 @@
-/** Recorded npm evidence stays intact while authored files and exact edits remain checked. */
+/** Authored files and exact edits stay checked while the vendored manifests stay pinned. */
 
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'

@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import {
   compareBaseline,
   countOccurrences,
+  fingerprintOf,
   occurrencesOf,
   readBaseline,
   writeBaseline,
@@ -72,8 +73,9 @@ export function check(
 ): readonly Finding[] {
   const { findings, added, stale } = audit(repoRoot, policy, baselinePath)
   if (added.length > 0) {
+    const byFingerprint = new Map(findings.map(finding => [`${finding.path}\0${fingerprintOf(finding)}`, finding]))
     const detail = added
-      .map(occurrence => findings.find(finding => finding.path === occurrence.file && finding.line === occurrence.line))
+      .map(occurrence => byFingerprint.get(`${occurrence.file}\0${occurrence.fingerprint}`))
       .filter((finding): finding is Finding => finding !== undefined)
     throw new Error('verify-private-distribution: the private invariant is not satisfied.\n'
       + `${formatFindings(detail)}\n`
@@ -101,6 +103,11 @@ export function record(
   baselinePath: string = BASELINE_PATH,
 ): BaselineCounts {
   const findings = scanPrivateDistribution(readCorpus(repoRoot, policy.corpusRoots), policy)
+  const baseline = readBaseline(baselineFile(repoRoot, baselinePath))
+  const { added } = compareBaseline(baseline, occurrencesOf(findings))
+  for (const occurrence of added) {
+    process.stdout.write(`  recorded ${occurrence.file}:${String(occurrence.line)} (${occurrence.fingerprint})\n`)
+  }
   const counts = countOccurrences(occurrencesOf(findings))
   writeBaseline(baselineFile(repoRoot, baselinePath), counts)
   return counts

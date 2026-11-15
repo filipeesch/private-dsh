@@ -84,15 +84,24 @@ function manifestFindings(file: CorpusFile, policy: PrivateDistributionPolicy): 
   return findings
 }
 
-const COMPOSITION_KEY = /^\s*(?:-\s*)?['"]?([@\w./-]+)['"]?\s*:/u
+/** A composition row's plugin package: `name: '@deepseek-ai/dsh-…'`. */
+const ROW_NAME = /^\s*name:\s*['"]?([@\w./-]+)['"]?\s*$/u
+/** A composition row's plugin id, which names the package without its scope. */
+const ROW_ID = /^\s*-\s*id:\s*['"]?([\w./-]+)['"]?\s*$/u
+/** The mapping form `plugins:\n  some-package:`, excluding the row fields themselves. */
+const MAPPING_KEY = /^\s*(?:-\s*)?['"]?([@\w./-]+)['"]?\s*:\s*$/u
+const ROW_FIELDS = new Set(['id', 'name', 'config', 'disabled', 'inject', 'children'])
 
 function compositionFindings(file: CorpusFile, policy: PrivateDistributionPolicy): Finding[] {
   const findings: Finding[] = []
   file.text.split('\n').forEach((line, index) => {
-    const match = COMPOSITION_KEY.exec(line)
-    if (match === null) return
-    const key = match[1] ?? ''
-    const removed = policy.removedPackages.find(({ name }) => key === name || key === bareName(name))
+    const rowName = ROW_NAME.exec(line)
+    const rowId = ROW_ID.exec(line)
+    const mapping = MAPPING_KEY.exec(line)
+    const candidate = rowName?.[1] ?? rowId?.[1] ?? mapping?.[1]
+    if (candidate === undefined) return
+    if (rowName === null && rowId === null && ROW_FIELDS.has(candidate)) return
+    const removed = policy.removedPackages.find(({ name }) => candidate === name || candidate === bareName(name))
     if (removed === undefined) return
     findings.push({
       rule: 'removed-package',

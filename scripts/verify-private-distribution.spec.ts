@@ -9,6 +9,7 @@ import type { PrivateDistributionPolicy } from './private-distribution/policy.ts
 import { scanEgress } from './private-distribution/rules/egress.ts'
 import { scanRemovedPackages } from './private-distribution/rules/removed-package.ts'
 import { scanRetiredIdentifiers } from './private-distribution/rules/retired-identifier.ts'
+import { formatFindings } from './private-distribution/report.ts'
 import { scanPrivateDistribution, type Finding } from './private-distribution/scan.ts'
 import { check, parseMode, record } from './verify-private-distribution.ts'
 
@@ -58,6 +59,24 @@ function rules(findings: readonly Finding[]): string[] {
   return findings.map(finding => finding.rule)
 }
 
+describe('report', () => {
+  it('prints one block per rule with the path, line, message, and fix', () => {
+    const findings: readonly Finding[] = [
+      { rule: 'egress', path: 'packages/a/src/x.ts', line: 4, evidence: 'fetch(u)', message: 'calls fetch', hint: 'declare a seam' },
+      { rule: 'removed-package', path: 'packages/a/package.json', line: 9, evidence: '"dsh-removed"', message: 'depends on removed', hint: 'drop it' },
+      { rule: 'retired-identifier', path: 'packages/a/src/y.ts', line: 2, evidence: 'anonymousId', message: 'names retired', hint: 'rename it' },
+    ]
+    const report = formatFindings(findings)
+    expect(report.split('\n').filter(line => line.startsWith('  ') && !line.startsWith('    '))).toHaveLength(3)
+    expect(report).toContain('egress packages/a/src/x.ts:4')
+    expect(report).toContain('removed-package packages/a/package.json:9')
+    expect(report).toContain('retired-identifier packages/a/src/y.ts:2')
+    expect(report).toContain('declare a seam')
+    expect(report).toContain('drop it')
+    expect(report).toContain('rename it')
+  })
+})
+
 describe('corpus', () => {
   it('admits shipped source and manifests under a declared root', () => {
     expect(admits(['packages'], 'packages/app/src/index.ts')).toBe(true)
@@ -71,8 +90,12 @@ describe('corpus', () => {
     expect(admits(['packages'], 'packages/app/tests/index.ts')).toBe(false)
     expect(admits(['packages'], 'packages/app/src/index.spec.ts')).toBe(false)
     expect(admits(['packages'], 'packages/app/src/index.e2e.ts')).toBe(false)
+    expect(admits(['packages'], 'packages/app/src/index.test.ts')).toBe(false)
     expect(admits(['packages'], 'packages/app/fixtures/index.ts')).toBe(false)
     expect(admits(['packages'], 'packages/app/lib/index.js')).toBe(false)
+    expect(admits(['packages'], 'packages/app/node_modules/app/index.ts')).toBe(false)
+    expect(admits(['packages'], 'packages/app/dist/index.ts')).toBe(false)
+    expect(admits(['packages'], 'packages/app/coverage/index.ts')).toBe(false)
     expect(admits(['packages'], 'apps/web/index.ts')).toBe(false)
     expect(admits(['packages'], 'packages/app/README.md')).toBe(false)
   })
@@ -126,12 +149,46 @@ describe('removed package rule', () => {
     expect(findings[0]?.message).toContain('dependency')
   })
 
-  it('reports a composition mounting a removed package by bare name', () => {
+  it('reports a composition row naming a removed package', () => {
+    const findings = scanRemovedPackages([
+      file('packages/app/cordis.patch.yml', [
+        '    - id: ui-thing',
+        "      name: '@deepseek-ai/dsh-removed-thing'",
+        '      config: {}',
+        '',
+      ].join('\n'), 'manifest'),
+    ], policy())
+    expect(findings).toHaveLength(1)
+    expect(findings[0]?.line).toBe(2)
+  })
+
+  it('reports a composition row whose id names a removed package without its scope', () => {
+    const findings = scanRemovedPackages([
+      file('packages/app/cordis.patch.yml', '    - id: removed-thing\n', 'manifest'),
+    ], policy())
+    expect(findings).toHaveLength(1)
+    expect(findings[0]?.line).toBe(1)
+  })
+
+  it('reports a mapping-form composition mounting a removed package by bare name', () => {
     const findings = scanRemovedPackages([
       file('packages/app/cordis.yml', 'plugins:\n  removed-thing:\n    enabled: true\n', 'manifest'),
     ], policy())
     expect(findings).toHaveLength(1)
     expect(findings[0]?.line).toBe(2)
+  })
+
+  it('ignores composition row fields that are not plugin names', () => {
+    const findings = scanRemovedPackages([
+      file('packages/app/cordis.patch.yml', [
+        '    - id: kept-thing',
+        '      name: kept-thing',
+        '      config:',
+        '        source: removed-thing',
+        '',
+      ].join('\n'), 'manifest'),
+    ], policy())
+    expect(findings).toEqual([])
   })
 
   it('reports nothing when a session reader names a removed producer event', () => {

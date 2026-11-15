@@ -43,7 +43,7 @@ export type RecordedHostKind =
   | 'test-placeholder'
   | 'model-provider'
   | 'package-metadata'
-  | 'removed-surface'
+  | 'update-origin'
 
 /** A literal host accepted inside a transport seam. */
 export interface RecordedHost {
@@ -133,6 +133,7 @@ export const TRANSPORT_SEAMS: readonly TransportSeam[] = [
   seam('packages/boot/plugin-market', 'plugin-transport', 'Plugin market metadata the user opens'),
   seam('packages/util/plugin-detail', 'plugin-transport', 'Plugin detail fetched from the registry the user browses'),
   seam('packages/client/connection', 'local-host', 'Client connection to the local Host'),
+  seam('packages/experimental/deepseek-chat-import/src/client', 'local-host', 'Client uploads the chosen archive to the local Host route, streaming it with XMLHttpRequest for progress'),
   seam('packages/client/file-upload', 'local-host', 'Uploads through the local Host connection'),
   seam('packages/client/ui-deliverables', 'local-host', 'Local Host calls from a client surface'),
   seam('packages/client/ui-file-actions', 'local-host', 'Local Host calls from a client surface'),
@@ -243,7 +244,7 @@ export const RECORDED_HOSTS: readonly RecordedHost[] = [
     'timestamp.digicert.com',
     'unpkg.com',
   ]),
-  ...hosts('removed-surface', ['download.deepseek.com', 'download-test.deepseek.com']),
+  ...hosts('update-origin', ['download.deepseek.com', 'download-test.deepseek.com']),
 ]
 
 /** Paths that must keep naming retired producers so persisted Sessions load. */
