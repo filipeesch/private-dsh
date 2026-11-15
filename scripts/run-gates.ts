@@ -27,6 +27,7 @@ export type Mode =
   | 'ci-snapshot'
   | 'ci-artifacts'
   | 'ci-consumers'
+  | 'ci-private-consumers'
   | 'ci-windows-blocking'
   | 'ci-windows-complete'
   | 'ci-windows-observational-ready'
@@ -167,6 +168,7 @@ function parseMode(raw: string | undefined): Mode {
     case 'ci-snapshot':
     case 'ci-artifacts':
     case 'ci-consumers':
+    case 'ci-private-consumers':
     case 'ci-windows-blocking':
     case 'ci-windows-complete':
     case 'ci-windows-observational-ready':
@@ -334,6 +336,8 @@ export function gatesForMode(selected: Mode): Gate[] {
       return ciArtifactGates()
     case 'ci-consumers':
       return ciConsumerGates()
+    case 'ci-private-consumers':
+      return ciPrivateConsumerGates()
     case 'ci-windows-blocking':
       return ciWindowsBlockingGates()
     case 'ci-windows-complete':
@@ -534,6 +538,32 @@ function ciArtifactGates(): Gate[] {
       needs: ['build'],
     }),
     builtBinSmokeGate(),
+  ]
+}
+
+/**
+ * The artifact consumers this distribution runs.
+ *
+ * Publication gates (publint, the NodeNext consumer types, the built-bin smokes) encode a release
+ * this distribution does not make, so they stay out of CI while their scripts stay available.
+ * @returns the gates that guard the built tree and its model-visible output.
+ */
+function ciPrivateConsumerGates(): Gate[] {
+  const builtTree = ['build']
+  const buildArtifactReaders = ['snapshot', 'expected-output', 'doc-typecheck']
+  return [
+    ciArtifactBuildGate(),
+    pnpmScript('node-compat', 'check:node-compat', {
+      label: 'Node compatibility',
+      env: { [CLIENT_BUILD_PROFILE_SELECTOR]: 'official' },
+    }),
+    snapshotGate(builtTree),
+    expectedOutputGate(builtTree),
+    webSnapshotGate(builtTree, buildArtifactReaders),
+    pnpmScript('doc-typecheck', 'doc-typecheck:contracts-ready', {
+      needs: builtTree,
+      env: { DSH_DOC_TYPECHECK_USE_BUILD_OUTPUT: '1' },
+    }),
   ]
 }
 

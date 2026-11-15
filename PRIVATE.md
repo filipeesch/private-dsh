@@ -50,6 +50,12 @@ Take everything from upstream — features, fixes, refactors, docs, tests — ex
 - **Take upstream defaults** for the model and search providers, and never remove API-key support.
 - **When unsure whether a change sends data out, treat it as outbound** until the code proves otherwise.
 
+## What CI runs
+
+[.github/workflows/private-ci.yml](.github/workflows/private-ci.yml) is the only workflow, and it runs five jobs: the static and documentation gates, typecheck with lint and cross-file duplication, the unit inventory in four shards, the artifact consumers, and the blocking Windows build. The unit job builds the vendored libraries first, because specs that boot a composition import plugin packages through Node's resolver and a clean checkout has no `vendor/*/lib` yet.
+
+The artifact consumers are the private aggregate `pnpm run check:ci:private:consumers`: it builds the artifacts, checks Node compatibility, replays the recorded Session corpus, runs the owner-local process expectations, drives the browser snapshots, and type-checks the documentation against the built output. The publication gates — publint, the NodeNext consumer types, and the built-bin smokes — stay out of CI because this distribution publishes nothing; their scripts remain available for a one-off check.
+
 ## What a merge review must show
 
 A synchronization pull request carries three pieces of evidence:

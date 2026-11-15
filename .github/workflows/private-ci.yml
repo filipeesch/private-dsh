@@ -106,7 +106,7 @@ jobs:
       - name: Install Playwright Chromium, WebKit and system dependencies
         run: pnpm --filter @deepseek-ai/dsh-web-frontend exec playwright install --with-deps chromium webkit
       - name: Run compatibility, snapshot and artifact gates
-        run: pnpm run check:ci:consumers
+        run: pnpm run check:ci:private:consumers
       # build:artifacts is the producer; build:check type-checks tests and scripts against its output.
       - name: Check tests and scripts against the build output
         run: pnpm run build:check
