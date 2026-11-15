@@ -2,29 +2,31 @@
 
 `filipeesch/dsh-private` tracks `deepseek-ai/deepseek-harness` (remote `upstream`) and stays in sync with it, with one invariant on top: **the application sends nothing to external parties except the model, search, and plugin requests the user configures.** No telemetry, analytics, feedback upload, usage identifiers, Session-log upload, account Sign In, or developer-controlled remote policy.
 
-This file is for maintainers: it records what upstream changes to drop or keep during a sync. Usage and update instructions for users are in [README.md](README.md#private-distribution).
+This file is for maintainers. It states the invariant, points at the one place the removal and egress policy is declared, and records what a synchronization must satisfy. Usage and update instructions for users are in [README.md](README.md#private-distribution).
 
-## Removed in this distribution
+## The policy is declared once
 
-Keep these removed. Upstream changes to them are dropped during merges.
+[scripts/private-distribution/policy.ts](scripts/private-distribution/policy.ts) is the only declaration of what this distribution removes and where network egress is allowed. It holds five lists:
 
-- Session-log upload (`session-log-deepseek`, `ui-settings-session-log`) and plugin inventory (`plugin-package-inventory-deepseek`) request extensions. The `deepseek-llm-api-extensions` registry stays as an inert seam with no shipped contributor (the SDK request-observation fixture and the LLM replay harness still use it); any new contributor is a new outbound path and is removed in the merge.
-- Identity headers `x-deepseek-harness-*`, the `anonymous-user-id` package (and its `$DSH_HOME/.anonymous-user-id` file), and the Session id that `llm-pi-ai` forwarded to pi-ai (provider session-affinity headers and `prompt_cache_key`).
-- Session telemetry (`session-telemetry-otel`, `session-telemetry`, `otel`), Desktop product analytics (`product-telemetry-otel`, `product-analytics`, Desktop `track()` calls, the `productAnalytics` Remote), and the `DSH_TELEMETRY_*` / `DSH_PRODUCT_ANALYTICS_OTLP_URL` environment variables with the `ProfileContext.telemetryDisabledEnv` plumbing.
-- Web-search `ori_question` and its `sendOriginalQuestion` setting (prompt excerpt sent with searches).
-- Electron spellchecking (`spellcheck: false` on the Desktop windows), which downloads dictionaries.
-- DeepSeek account Sign In: `deepseek-account`, `deepseek-account-platform`, `llm-deepseek-account`, `account-controller`, `ui-settings-account`, Desktop Welcome sign-in and Platform view, the Feishu contact form.
-- Desktop mandatory-update policy and the `download.deepseek.com` update feed.
-- Desktop distribution: this repository ships no Desktop installers, releases, or auto-update, and has no Desktop release workflow. Upstream Desktop release, update-feed, update-channel, and telemetry wiring is dropped in merges. A packaged Desktop built from this repository would use upstream's update feed and is unsupported.
-- Upstream CI and governance in `.github`: every upstream workflow, the review-ownership and issue-management policies, `dependabot.yml`, issue templates, and the specs and gates that only policed them. Upstream CI needs DeepSeek runners, secrets, and GitHub App credentials; Dependabot PRs would fight upstream syncs; Issues are disabled.
+- **Removed packages.** Packages this distribution does not ship, each with the surface it carried.
+- **Retired identifiers.** Names that disappeared with those surfaces.
+- **Transport seams.** Packages allowed to start network egress, each with a reason. A provider's endpoint comes from configuration, so adding a provider costs its package plus one seam entry here — not a host registration.
+- **Recorded literal hosts.** Hostnames that appear in code inside a seam, grouped by what they identify: protocol namespace, test placeholder, model provider, package metadata, or removed surface.
+- **Compatibility paths.** Session reader and migration paths that must keep naming retired producers so old Sessions still load.
 
-## Kept in this distribution
+Nothing else in the repository restates those lists. Prose describes them; the module declares them.
 
-DeepSeek API-key support (the `llm-deepseek-api-key` model provider and the `web-search-deepseek` and `web-deepseek-api` search and fetch providers) must be kept and is never removed during a sync. Defaults follow upstream: `agent-default-model` and `web.searchProvider` keep upstream's values, because a default sends nothing without user-configured credentials. Feedback stays local.
+## What the audit enforces
 
-## CI
+`pnpm run verify-private-distribution` runs the audit; `pnpm run gen-private-distribution` records occurrences a maintainer has accepted. The audit is part of the static aggregate behind the required `private-ci passed` check.
 
-`.github/workflows/private-ci.yml` runs on GitHub-hosted runners without secrets for pull requests to `master` and pushes to `master`. Its final job, **`private-ci passed`**, is the required merge check: it needs every other job and fails when any of them failed, was cancelled, or was skipped. Mark exactly that name as required in branch protection or the ruleset. Instrumented coverage, benchmarks, Python SDK runtime, and macOS builds are not ported; unit tests run uninstrumented in four shards.
+Three rules cover shipped source under `packages`, `apps`, `native`, and `scripts` (tests, fixtures, and build output excluded):
+
+1. **A removed package cannot come back**, whether mounted in a composition, declared in a manifest, or imported by code.
+2. **A retired identifier cannot return** outside the compatibility paths.
+3. **Network egress stays inside a declared transport seam**, and a literal host inside one must be recorded.
+
+Accepted occurrences are recorded by syntax fingerprint, so an occurrence that moves between lines stays accepted and an edited one is reported again. The audit fails closed: an empty corpus, or a declared root that contributes nothing, is a failure rather than a pass.
 
 ## Syncing with upstream
 
@@ -37,26 +39,25 @@ git merge upstream/master
 git push origin master
 ```
 
-## What to bring from upstream
+Take everything from upstream — features, fixes, refactors, docs, tests — except what conflicts with the invariant:
 
-Take everything by default — features, fixes, refactors, docs, tests — except changes that conflict with the invariant:
+- **Removals win the conflict.** Keep a deleted file deleted, and when upstream moved the same behavior elsewhere, remove it there too, adding it to the policy.
+- **Drop what needs upstream infrastructure.** Workflows that require upstream runners, secrets, or release feeds do not belong here; a workflow that runs on GitHub-hosted runners without secrets has its useful checks ported into `.github/workflows/private-ci.yml`.
+- **Drop documentation for surfaces that do not exist here,** including upgrade guides for removed features.
+- **Keep old Sessions loadable.** Persisted events written by removed producers keep their reader support and their compatibility paths.
+- **Take upstream defaults** for the model and search providers, and never remove API-key support.
+- **When unsure whether a change sends data out, treat it as outbound** until the code proves otherwise.
 
-1. **Modify/delete conflict on a removed package or file:** keep the deletion, then check whether upstream moved the outbound behavior elsewhere and remove it there too.
-2. **New outbound path** (new host, request field, telemetry consumer, identifier header, remote config or policy fetch): remove it in the merge commit and add it to the list above.
-3. **Re-mounted removed row** in a `cordis.patch.yml`: drop the row.
-4. **Changed defaults** for model provider or search provider: take upstream's. Never remove API-key support.
-5. **Desktop release, update, or telemetry wiring** (workflows, update feeds, updater changes that add network behavior): drop it.
-6. **Unclear whether a change sends data out:** treat it as outbound until the code proves otherwise.
-7. **Persisted Session events** whose producer was removed (`feedback/*`, `session-log-deepseek/delivery-accepted`, events naming the `deepseek-account` provider): keep reader support; old sessions must still load ([format rules](docs/session-format-status.md)).
-8. **Upstream changes to deleted `.github` files** (workflows, policies, templates, `dependabot.yml`): drop them and keep the deletion.
-9. **New upstream workflow:** delete it in the merge commit unless it runs on GitHub-hosted runners without DeepSeek secrets; then port its useful checks into `private-ci.yml` and add any new job to `private-ci passed`'s `needs`.
-10. **Upstream gate or spec that reads a deleted workflow:** delete it with the workflow rather than editing it.
+## What a merge review must show
 
-## Post-merge audit
+A synchronization pull request carries three pieces of evidence:
 
-Investigate new hits after every merge:
+- The output of `pnpm run verify-private-distribution` on the merged tree.
+- The reviewed inventory of literal hosts the merge introduced, and the seam entries it added.
+- For each new upstream package that could reach the network, the conclusion that it does so only through a declared seam.
 
-```sh
-grep -rhoE 'https?://[a-zA-Z0-9.-]+\.[a-z]{2,}' packages apps native --include='*.ts' --include='*.tsx' --include='*.yml' --exclude-dir=node_modules --exclude-dir=lib --exclude-dir=tests | sort -u
-grep -rnE 'productTelemetry|productAnalytics|sessionTelemetry|createEventReporter|deepseekLlmApiExtensions|anonymous-user-id|x-deepseek-harness|deepseeksvc|session-log-deepseek|plugin-package-inventory|dsh_session_log|dsh_plugin_packages|ori_question|DSH_TELEMETRY|deepseekAccount|deepseek-account|platform-session|mandatory-update|check_client_update|private-update-feed|private-desktop-release|feishu' packages apps scripts .github --include='*.ts' --include='*.tsx' --include='*.mts' --include='*.mjs' --include='*.yml' --include='*.json' --exclude-dir=node_modules --exclude-dir=lib
-```
+A merge with a finding, or without that evidence, is not ready.
+
+## Post-merge sweep
+
+After resolving conflicts, run `pnpm run gen-private-distribution`, then read the resulting diff instead of approving it: every added entry is a statement that an occurrence is legitimate, and every removed entry is a statement that the merge deleted something. Record only what you can justify in one line, and add the justification as a seam reason or a compatibility path rather than leaving it unexplained in the data.
