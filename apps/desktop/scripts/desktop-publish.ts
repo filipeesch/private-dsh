@@ -60,11 +60,15 @@ function same(left: DesktopObjectDigest | null, right: DesktopObjectDigest | nul
   return left === null || right === null ? left === right : left.size === right.size && left.sha512 === right.sha512
 }
 
-function version(contents: string, remote = false): string {
+function parsedVersion(contents: string): string | undefined {
   try {
-    const parsed = z.object({ version: z.string() }).parse(load(contents))
-    if (valid(parsed.version) !== null) return parsed.version
+    return z.object({ version: z.string() }).parse(load(contents)).version
   } catch (error) { /* Discard parser error details, which may include raw remote YAML. */ }
+}
+
+function version(contents: string, remote = false): string {
+  const parsed = parsedVersion(contents)
+  if (parsed !== undefined && valid(parsed) !== null) return parsed
   throw new DesktopPublishError(remote ? 'verification-failed' : 'invalid-plan',
     `desktop publish: invalid ${remote ? 'remote' : 'planned'} channel version`)
 }

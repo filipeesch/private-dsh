@@ -30,13 +30,15 @@ it('loads Desktop Office CLI paths and removes them on disposal', async () => {
       ['agents', AgentRegistry], ['systemPrompt', SystemPrompt], ['tools', ToolRuntime], ['toolExecutor', NativeToolExecutor],
       ['skills', SkillRegistry], ['office', desktopOffice],
     ])
-    ctx.loader.internal = {
-      version: 'v2',
-      async import(specifier: string) {
-        if (!modules.has(specifier)) throw new Error(`unexpected plugin ${specifier}`)
-        return modules.get(specifier)
+    Object.assign(ctx.loader, {
+      internal: {
+        version: 'v2',
+        async import(specifier: string) {
+          if (!modules.has(specifier)) throw new Error(`unexpected plugin ${specifier}`)
+          return modules.get(specifier)
+        },
       },
-    } as unknown as NonNullable<typeof ctx.loader.internal>
+    })
     const config = join(root, 'cordis.yml')
     await writeFile(config, [
       '- name: agents', '- name: systemPrompt', '- name: tools', '- name: skills', '- name: office',
