@@ -1,6 +1,7 @@
 /** Live DOM ownership for docked and floating sidebar pages. */
 import type { LayoutState, PaneId, TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SidebarRightOccurrenceHost } from './occurrences.ts'
 import type { TabOccurrence } from './tab-domain.ts'
 
 /** A page captured from the currently mounted Session and its current occurrence. */
@@ -8,9 +9,21 @@ export interface SidebarRightTarget {
   readonly sessionId: SessionId
   readonly paneId: PaneId
   readonly host: 'dock' | 'float'
+  /** The occurrence that owns the captured element: the frame column or an embedded host. */
+  readonly occurrenceHost: SidebarRightOccurrenceHost
   readonly tabId: TabId | undefined
   readonly occurrence: TabOccurrence | undefined
   readonly navigationRevision: number | undefined
+}
+
+/**
+ * The occurrence host that owns one panel element.
+ * @param element - any element inside a panel subtree.
+ * @returns the host marker, defaulting to the frame occurrence for markup without one.
+ */
+function occurrenceHostOf(element: Element | null): SidebarRightOccurrenceHost {
+  return (element?.closest<HTMLElement>('[data-sidebar-right-session]')?.dataset.sidebarRightOccurrenceHost
+    ?? 'main') as SidebarRightOccurrenceHost
 }
 
 /**
@@ -19,6 +32,7 @@ export interface SidebarRightTarget {
  * @param sessionId - Session currently drawn by the sidebar.
  * @param layout - current committed layout for that Session.
  * @param occurrence - current occurrence lookup for a committed tab.
+ * @param expectedHost - the occurrence host the effective target reported.
  * @returns the captured page, or undefined for stale, hidden, or outside elements.
  */
 export function sidebarTargetFromElement(
@@ -26,10 +40,12 @@ export function sidebarTargetFromElement(
   sessionId: SessionId,
   layout: LayoutState,
   occurrence: (tabId: TabId) => TabOccurrence,
+  expectedHost: SidebarRightOccurrenceHost = 'main',
 ): SidebarRightTarget | undefined {
   if (element === null || !element.isConnected) return undefined
   const owner = element.closest<HTMLElement>('[data-sidebar-right-session]')
   if (owner?.dataset.sidebarRightSession !== sessionId) return undefined
+  if (occurrenceHostOf(element) !== expectedHost) return undefined
   const container = element.closest<HTMLElement>('[data-dockkit-pane], [data-dockkit-float]')
   const paneId = (container?.dataset.dockkitPane ?? container?.dataset.dockkitFloat) as PaneId | undefined
   if (paneId === undefined || container?.closest('[hidden], [aria-hidden="true"]') !== null) return undefined
@@ -42,7 +58,7 @@ export function sidebarTargetFromElement(
   const marker = element.closest<HTMLElement>('[data-sidebar-right-occurrence]')
     ?? tabElement?.querySelector<HTMLElement>('[data-sidebar-right-occurrence]')
   if (marker !== null && marker !== undefined && marker.dataset.sidebarRightOccurrence !== held?.id) return undefined
-  return { sessionId, paneId, host: pane.host, tabId, occurrence: held,
+  return { sessionId, paneId, host: pane.host, tabId, occurrenceHost: expectedHost, occurrence: held,
     navigationRevision: held?.navigation.getSnapshot().revision }
 }
 
@@ -51,15 +67,19 @@ export function sidebarTargetFromElement(
  * @param document - product document containing docked and floating panes.
  * @param sessionId - Session whose panes may receive focus.
  * @param paneId - preferred pane before an operation changed the layout.
+ * @param host - the occurrence host to stay inside; omitted searches every occurrence.
  * @returns a surviving visible pane, or undefined when the Session has none.
  */
-export function visibleSidebarPane(document: Document, sessionId: SessionId, paneId: PaneId): HTMLElement | undefined {
+export function visibleSidebarPane(
+  document: Document, sessionId: SessionId, paneId: PaneId, host?: SidebarRightOccurrenceHost,
+): HTMLElement | undefined {
   const panes = [...document.querySelectorAll<HTMLElement>('[data-dockkit-pane], [data-dockkit-float]')]
     .filter((pane) => {
       const owner = pane.closest<HTMLElement>('[data-sidebar-right-session]')
-      return owner?.dataset.sidebarRightSession === sessionId
-        && pane.closest('[hidden], [aria-hidden="true"]') === null
-        && (pane.hasAttribute('data-dockkit-float') || owner.hasAttribute('data-sidebar-right-open'))
+      if (owner === null || owner.dataset.sidebarRightSession !== sessionId) return false
+      if (host !== undefined && occurrenceHostOf(pane) !== host) return false
+      if (pane.closest('[hidden], [aria-hidden="true"]') !== null) return false
+      return pane.hasAttribute('data-dockkit-float') || owner.hasAttribute('data-sidebar-right-open')
     })
   return panes.find(pane => (pane.dataset.dockkitPane ?? pane.dataset.dockkitFloat) === paneId)
     ?? panes.find(pane => pane.hasAttribute('data-dockkit-pane-active') || pane.hasAttribute('data-dockkit-float-active')) ?? panes[0]
@@ -72,7 +92,13 @@ export function visibleSidebarPane(document: Document, sessionId: SessionId, pan
  */
 export function observeSidebarFocus(document: Document): () => void {
   let active = true
-  let focused: { element: Element; sessionId: SessionId; paneId: PaneId; occurrence: string | undefined } | undefined
+  let focused: {
+    element: Element
+    sessionId: SessionId
+    paneId: PaneId
+    occurrenceHost: SidebarRightOccurrenceHost
+    occurrence: string | undefined
+  } | undefined
   const removal = new MutationObserver(() => {
     if (focused === undefined || focused.element.isConnected) return
     const previous = focused
@@ -84,7 +110,8 @@ export function observeSidebarFocus(document: Document): () => void {
         .find(marker => marker.dataset.sidebarRightOccurrence === previous.occurrence)
         ?.closest<HTMLElement>('[data-dockkit-pane], [data-dockkit-float]')
     const paneId = (moved?.dataset.dockkitPane ?? moved?.dataset.dockkitFloat) as PaneId | undefined
-    visibleSidebarPane(document, previous.sessionId, paneId ?? previous.paneId)?.focus({ preventScroll: true })
+    visibleSidebarPane(document, previous.sessionId, paneId ?? previous.paneId, previous.occurrenceHost)
+      ?.focus({ preventScroll: true })
   })
   const capture = (): void => {
     removal.disconnect()
@@ -100,7 +127,10 @@ export function observeSidebarFocus(document: Document): () => void {
       ?? pane.querySelector<HTMLElement>('[role="tab"][aria-selected="true"], [data-dockkit-float-title]')
     const marker = element.closest<HTMLElement>('[data-sidebar-right-occurrence]')
       ?? tab?.querySelector<HTMLElement>('[data-sidebar-right-occurrence]')
-    focused = { element, sessionId, paneId, occurrence: marker?.dataset.sidebarRightOccurrence }
+    focused = {
+      element, sessionId, paneId, occurrenceHost: occurrenceHostOf(owner),
+      occurrence: marker?.dataset.sidebarRightOccurrence,
+    }
     removal.observe(owner, { childList: true, subtree: true })
     // Observe removal of the whole Session seat as well as its tab bodies.
     if (owner.parentElement !== null) removal.observe(owner.parentElement, { childList: true })

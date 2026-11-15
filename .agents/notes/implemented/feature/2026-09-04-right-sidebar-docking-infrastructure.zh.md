@@ -12,7 +12,7 @@ Agent 产出的文件是最尖锐的案例。产出文件 chip 或 `read` 行的
 
 ## Decision
 
-右列是每会话一份的停靠面（分栏 pane、tab、浮动面板与可撤销的操作序列），由 `ui-sidebar-right` 基于 `ui-dockkit` 引擎持有，取代原来的 Detail 面板。本篇只管这个面：引擎、框架的右列、面板的两种呈现与控件、每会话的状态。面里放什么由别处决定：插件如何声明 tab 类型、打开内容、拿到 props 见[tab 类型与导航](../../../../packages/client/ui-sidebar-right/README.zh.md)；地址背后的活数据见[客户端资源模型](../architecture/2026-09-05-client-resource-model.zh.md)；读工作区文件见[工作区文件服务](../architecture/2026-09-05-workspace-files-service.zh.md)；引导页、文本预览与文件树见[随包类型](../../../../packages/client/ui-sidebar-documentpreview/README.zh.md)。
+右列是每会话一份的停靠面（分栏 pane、tab、浮动面板与可撤销的操作序列），由 `ui-sidebar-right` 基于 `ui-dockkit` 引擎持有，取代原来的 Detail 面板。本篇只管这个面：引擎、框架的右列、面板的两种呈现与控件、每会话的状态。面里放什么由别处决定：插件如何声明 tab 类型、打开内容、拿到 props 见[tab 类型与导航](../../../../packages/client/ui-sidebar-right/README.zh.md)；地址背后的活数据见[客户端资源模型](../architecture/2026-09-05-client-resource-model.zh.md)；读工作区文件见[工作区文件服务](../architecture/2026-09-05-workspace-files-service.zh.md)；引导页、文本预览与文件树见[随包类型](../../../../packages/client/ui-sidebar-documentpreview/README.zh.md)。面板的公开组合与内嵌出现见[面板 Factory 笔记](../architecture/2026-11-15-right-sidebar-panel-factory.zh.md)。
 
 ### 包拓扑
 
@@ -21,7 +21,7 @@ Agent 产出的文件是最尖锐的案例。产出文件 chip 或 `read` 行的
 | 包 | 形态 | 所有物 |
 |---|---|---|
 | `packages/client/ui-dockkit` | 静态链接库，零 DSH 依赖 | 布局引擎与渲染/驱动它的 React 组件；消费方编译其源码，且它只保留一张样式表，因为消费方按文件名去重注入的样式表 |
-| `packages/client/ui-sidebar-right` | 动态插件 | 共用一个 store 的 `rightbar` 面板坑位与 `conversation.session.header.corner` 展开按钮、每会话一份 surface、两种呈现模式、浮层宿主、`ctx.sidebarRight`、`ctx.sidebarRightTabs`、tab 域（每条 tab 记录一个 occurrence）、三个扩展坑位、引导 tab 类型与 `sidebarRight` 文案命名空间 |
+| `packages/client/ui-sidebar-right` | 动态插件 | `sidebar.right.panel` Factory 及其 `main`/`embedded` 出现、`rightbar.session` 框架适配席位、共用一个 store 的 `conversation.session.header.corner` 展开按钮、每会话一份 surface、两种呈现模式、浮层宿主、`ctx.sidebarRight`、`ctx.sidebarRightTabs`、tab 域（每条 tab 记录一个 occurrence）、tab 扩展坑位、引导 tab 类型与 `sidebarRight` 文案命名空间 |
 
 该库的第一个嵌入方就是本产品，而库对此一无所知：所有字符串经 `DockLabels` 传入，所有 tab 正文经按不透明 `kind` 分派的 `TabRenderer` 传入，所有手势经 `DockIntents` 传出。集成包提供库拒绝知晓的一切。
 
@@ -41,7 +41,7 @@ Agent 产出的文件是最尖锐的案例。产出文件 chip 或 `read` 行的
 
 [Sidebar 引导页规则](../../../../packages/client/ui-sidebar-right/README.zh.md#the-guide)定义默认页选择与显式关闭，移动 tab 仍会处理被清空的格。
 
-`ui-sidebar-right` 为每个会话 id 保存一份 `SurfaceState`——布局、历史与铸造计数——住在坑位注册时声明的 store 里。每个 action 先铸造意图所需的 id，向库的 planner 索取操作，对结果跑一遍 settle planner，把整个意图记为一条历史账，再把该会话的 surface 整体赋回；没有 action 就地改布局。settle 是产品规则：最后一个 tab 被关闭、拖走或悬浮出去的停靠 pane 会被合并掉；展开且为空的根 pane 会填入当前默认页。折叠的布局可以保持为空，直到下次展开；没有单独的关闭 pane 手势。[布局持久化与 provider 恢复](../../../../packages/client/ui-sidebar-right/README.zh.md)负责 Session 作用域的浏览器存储和刷新。布局是呈现状态，永不进入会话日志。
+`ui-sidebar-right` 为每个会话 id 保存一份 `SurfaceState`——布局、历史与铸造计数——住在面板 Factory 声明的 store 里。每个 action 先铸造意图所需的 id，向库的 planner 索取操作，对结果跑一遍 settle planner，把整个意图记为一条历史账，再把该会话的 surface 整体赋回；没有 action 就地改布局。settle 是产品规则：最后一个 tab 被关闭、拖走或悬浮出去的停靠 pane 会被合并掉；展开且为空的根 pane 会填入当前默认页。折叠的布局可以保持为空，直到下次展开；没有单独的关闭 pane 手势。[布局持久化与 provider 恢复](../../../../packages/client/ui-sidebar-right/README.zh.md)负责 Session 作用域的浏览器存储和刷新。布局是呈现状态，永不进入会话日志。
 
 ### 面之外
 

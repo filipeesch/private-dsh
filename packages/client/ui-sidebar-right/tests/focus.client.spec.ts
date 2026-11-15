@@ -27,10 +27,10 @@ function harness() {
   const tabs = new SidebarRightTabRegistry(ctx)
   for (const kind of ['guide', 'files', 'terminal']) tabs.register({ id: kind, kind, title: () => kind, multiple: kind === 'terminal' })
   const room = { allowed: true, autoFullscreen: false }
-  const { controller, adopt, show: showSession, measure } = createSidebarRightController(tabs, vi.fn(), {
+  const { controller, adopt, show: showSession, measure, enterEmbedded } = createSidebarRightController(tabs, vi.fn(), {
     autoFullscreen: () => room.autoFullscreen,
-    openWithFocus: (_sessionId, open) => { open() },
-    closeWithFocus: (_sessionId, _paneId, close) => { close() },
+    openWithFocus: (_sessionId, _host, open) => { open() },
+    closeWithFocus: (_sessionId, _host, _paneId, close) => { close() },
   })
   const store = createSidebarRightStore(() => ({ kind: 'guide', title: 'guide' })).create()
   releases.push(adopt(SESSION, store), () => { controller.tabDomain.dispose() })
@@ -62,7 +62,7 @@ function harness() {
     parent.append(element)
     return element
   }
-  return { controller, store, layout, paneElement, tabElement, room, show }
+  return { controller, store, layout, paneElement, tabElement, room, show, enterEmbedded }
 }
 
 describe('sidebar focus targets', () => {
@@ -112,6 +112,48 @@ describe('sidebar focus targets', () => {
     composer.focus()
     expect(h.controller.focusedTarget()).toBeUndefined()
     expect(h.controller.commandTarget()?.paneId).toBe(right)
+  })
+
+  it('distinguishes the two occurrences of one Session by host marker', () => {
+    const h = harness()
+    h.controller.openTab('files')
+    const files = h.controller.active()!.id
+    const occurrence = h.controller.tabDomain.occurrence(SESSION, { id: files }).id
+    const paneId = findTabPane(h.layout(), files).id
+    const mainChip = h.tabElement(files)
+    mainChip.focus()
+    expect(h.controller.focusedTarget()).toMatchObject({ sessionId: SESSION, occurrenceHost: 'main' })
+    // The embedded subtree reuses the Session's pane ids, so only its host marker separates it.
+    const embedded = document.createElement('section')
+    embedded.dataset.sidebarRightSession = SESSION
+    embedded.dataset.sidebarRightOccurrenceHost = 'embedded'
+    embedded.setAttribute('data-sidebar-right-open', '')
+    const embeddedPane = document.createElement('section')
+    embeddedPane.tabIndex = -1
+    embeddedPane.dataset.dockkitPane = paneId
+    const embeddedChip = document.createElement('div')
+    embeddedChip.tabIndex = 0
+    embeddedChip.dataset.dockkitTab = files
+    embeddedChip.dataset.sidebarRightOccurrence = occurrence
+    embeddedPane.append(embeddedChip)
+    embedded.append(embeddedPane)
+    document.body.append(embedded)
+    // Focus inside the other occurrence is not captured while the frame target is in force.
+    embeddedChip.focus()
+    expect(h.controller.focusedTarget()).toBeUndefined()
+    // While the embedded occurrence reports itself, only its subtree is captured.
+    const leave = h.enterEmbedded(SESSION)
+    const target = h.controller.focusedTarget()
+    expect(target).toMatchObject({ sessionId: SESSION, occurrenceHost: 'embedded', tabId: files })
+    // Shortcut resolution targets the embedded occurrence, so its opens land there.
+    expect(h.controller.commandTarget(embeddedChip)).toMatchObject({ occurrenceHost: 'embedded', tabId: files })
+    mainChip.focus()
+    expect(h.controller.focusedTarget()).toBeUndefined()
+    // Releasing the report makes the captured target stale and restores the frame occurrence.
+    leave()
+    expect(target === undefined || h.controller.isTargetCurrent(target)).toBe(false)
+    mainChip.focus()
+    expect(h.controller.focusedTarget()).toMatchObject({ occurrenceHost: 'main' })
   })
 
   it('rejects collapsed, disconnected, switched-session, moved and reopened targets', () => {

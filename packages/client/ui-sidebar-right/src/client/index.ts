@@ -39,7 +39,9 @@ import type {} from './contract/slots.ts'
 import { GuideBody, type GuideInjected } from './tabs/guide/GuideBody.tsx'
 import { GuideTitle } from './tabs/guide/GuideTitle.tsx'
 import { ExpandButton } from './shell/ExpandButton.tsx'
-import { RightbarSeat, type SidebarRightInjected } from './shell/SidebarRight.tsx'
+import { RightbarSeat, type SidebarRightFrameInjected } from './shell/SidebarRight.tsx'
+import { SidebarRightPanel } from './shell/PanelFactory.tsx'
+import type { SidebarRightPanelInjected } from './contract/slots.ts'
 import { closeWithPaneFocus, openWithPaneFocus } from './shell/close-focus.ts'
 import { RightbarRoot, type RightbarRootInjected } from './shell/RightbarRoot.tsx'
 import { SidebarSessionViews } from './session-views.ts'
@@ -54,7 +56,12 @@ import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import { defaultSeed } from './contract/seed.ts'
 
 export type { SidebarRightTarget } from './focus.ts'
-export type { RightbarSeatProps, SidebarRightInjected, SidebarRightPresentation } from './shell/SidebarRight.tsx'
+export type {
+  RightbarSeatProps, SidebarRightFrameInjected, SidebarRightPresentation, SidebarRightRetainTab,
+} from './shell/SidebarRight.tsx'
+export type {
+  SidebarRightPanelInjected, SidebarRightPanelInputProps, SidebarRightPanelProps,
+} from './contract/slots.ts'
 export type { GuideBodyProps, GuideInjected } from './tabs/guide/GuideBody.tsx'
 export type { ExpandButtonProps } from './shell/ExpandButton.tsx'
 export type { SidebarRightState, SurfaceState } from './stores.ts'
@@ -126,15 +133,18 @@ export function apply(ctx: ClientContext): void {
   // The automatic fullscreen rule as the seats last rendered it: the frame
   // hands them its width as owner props, and every seat reports the same rule.
   let autoFullscreen = false
-  const { controller, adopt, forget, show, measure } = createSidebarRightController(
-    tabs,
-    (address, signal) => { ctx.resources.pin(address, signal) },
-    {
-      autoFullscreen: () => autoFullscreen,
-      openWithFocus: (sessionId, open) => { openWithPaneFocus(document, sessionId, open) },
-      closeWithFocus: (sessionId, paneId, close) => { closeWithPaneFocus(document, sessionId, paneId, close) },
-    },
-  )
+  const { controller, adopt, forget, show, measure, enterEmbedded, takePendingExpansion, drawingSource }
+    = createSidebarRightController(
+      tabs,
+      (address, signal) => { ctx.resources.pin(address, signal) },
+      {
+        autoFullscreen: () => autoFullscreen,
+        openWithFocus: (sessionId, host, open) => { openWithPaneFocus(document, sessionId, open, host) },
+        closeWithFocus: (sessionId, host, paneId, close) => {
+          closeWithPaneFocus(document, sessionId, paneId, close, host)
+        },
+      },
+    )
   ctx.effect(() => ctx.slots.inject('contextMenu.icon', () => ctx.slots.register({
     name: 'contextMenu.icon', key: 'sidebar.close',
   }, IconCloseOutlineRegular)), 'sidebar: menu icon')
@@ -217,19 +227,53 @@ export function apply(ctx: ClientContext): void {
         } }
       },
     }
-    const injected: Omit<SidebarRightInjected, 'keyedHooks' | 'occurrence' | 'closeTab' | 'measureRoom' | 'hooks'> = {
+    // What the frame occurrence reports, and how it learns that an embedded
+    // occurrence of the same Session is currently drawing the panel instead.
+    const frameInjected: SidebarRightFrameInjected = {
       syncPresentation({ shown, track, fullscreen }) {
         if (shown) layout.openRightbar(track, fullscreen)
         else layout.closeRightbar()
       },
       reportAutoFullscreen: (value) => { autoFullscreen = value },
-      splitPane: (paneId) => { controller.split(paneId) },
-      toggleFullscreen: () => { const target = controller.commandTarget(); if (target !== undefined) controller.toggleFullscreen(target) },
-      openTab: (kind, options) => { controller.openTab(kind, options) },
+      keyedHooks: { drawnElsewhere: key => drawingSource(key as SessionId) },
     }
     const tabTypes = { subscribe: (listener: () => void) => tabs.subscribe(listener), getSnapshot: () => tabs.entries() }
+    // What every panel occurrence consumes: chrome callbacks, the tab type
+    // roster, each Session's flash source, and this occurrence's own entry into
+    // the navigation-target layer.
+    const panelInjected = (sessionId: SessionId): SidebarRightPanelInjected => ({
+      openTab: (kind, options) => { controller.openTab(kind, options) },
+      closeTab: (tabId) => {
+        try { controller.closeIn(sessionId, tabId) }
+        catch (error) { console.error('Sidebar tab close failed:', error) }
+      },
+      splitPane: (paneId) => { controller.split(paneId) },
+      toggleFullscreen: () => { const target = controller.commandTarget(); if (target !== undefined) controller.toggleFullscreen(target) },
+      measureRoom: (canSplitPane) => { measure(sessionId, canSplitPane) },
+      enterEmbedded: () => enterEmbedded(sessionId),
+      takePendingExpansion: () => takePendingExpansion(sessionId),
+      hooks: {
+        contextMenuTarget: ctx.contextMenus.active, shortcuts: ctx.shortcuts.catalog, tabTypes, flash: controller.flashOf(sessionId),
+      },
+      keyedHooks: { tabNavigation: key => controller.tabDomain.occurrence(sessionId, { id: key as TabId }).navigation },
+      occurrence: tab => controller.tabDomain.occurrence(sessionId, tab),
+    })
 
     const disposeTypes = [tabs.register(guideDefinition(t))]
+    // The Factory owns the tab extension seats; the frame seat renders it in the
+    // main variant. Registered in this same effect so no composition declares
+    // the seats twice.
+    const disposeFactory = ctx.slots.registerFactory({
+      name: 'sidebar.right.panel',
+      scope: 'session',
+      store,
+      locale: NS,
+      children: {
+        'sidebar.right.pane.tab': { kind: 'keyed', scope: 'session', inject: { hooks: { tabInfo: tabInfoFactory } } },
+        'sidebar.right.pane.tab.title': { kind: 'keyed', scope: 'session', inject: { hooks: { tabInfo: tabInfoFactory } } },
+      },
+      inject: sessionId => panelInjected(sessionId),
+    }, SidebarRightPanel)
     const disposeSeat = ctx.slots.inject('rightbar', function* () {
       yield ctx.slots.register({
         name: 'rightbar',
@@ -241,25 +285,8 @@ export function apply(ctx: ClientContext): void {
       }, RightbarRoot)
       yield ctx.slots.register({
         name: 'rightbar.session',
-        locale: NS,
-        children: {
-          'sidebar.right.pane.tab': { kind: 'keyed', scope: 'session', inject: { hooks: { tabInfo: tabInfoFactory } } },
-          'sidebar.right.pane.tab.title': { kind: 'keyed', scope: 'session', inject: { hooks: { tabInfo: tabInfoFactory } } },
-        },
         store,
-        inject: (sessionId): SidebarRightInjected => ({
-          ...injected,
-          hooks: {
-            contextMenuTarget: ctx.contextMenus.active, shortcuts: ctx.shortcuts.catalog, tabTypes, flash: controller.flashOf(sessionId),
-          },
-          measureRoom: (canSplitPane) => { measure(sessionId, canSplitPane) },
-          closeTab: (tabId) => {
-            try { controller.closeIn(sessionId, tabId) }
-            catch (error) { console.error('Sidebar tab close failed:', error) }
-          },
-          keyedHooks: { tabNavigation: key => controller.tabDomain.occurrence(sessionId, { id: key as TabId }).navigation },
-          occurrence: tab => controller.tabDomain.occurrence(sessionId, tab),
-        }),
+        inject: (): SidebarRightFrameInjected => frameInjected,
       }, RightbarSeat)
     })
     // The expand button shares the panel's store: it only needs to know whether
@@ -311,6 +338,7 @@ export function apply(ctx: ClientContext): void {
       disposeGuide()
       disposeExpand()
       disposeSeat()
+      disposeFactory()
       for (const dispose of disposeTypes.reverse()) dispose()
       for (const release of adoptions.values()) release()
       adoptions.clear()
