@@ -79,6 +79,10 @@ jobs:
           bubblewrap: 'true'
       - name: Build the native system addon
         run: pnpm run build:native-system
+      # Specs that boot a Cordis composition import plugin packages through Node's resolver, so the
+      # vendored libraries must exist as built artifacts; a clean checkout has no `lib/` yet.
+      - name: Build the vendored libraries
+        run: pnpm run build:artifacts
       - name: Run unit tests
         run: pnpm exec vitest run --shard=${{ matrix.shard }}/4
 
