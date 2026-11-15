@@ -494,7 +494,7 @@ async function main(): Promise<void> {
     return {
       start: async () => {
         const ready = await host.start()
-        const cookie = await authenticateWebHost(ready.url)
+        const cookie = ready.authenticationCookie ?? await authenticateWebHost(ready.url)
         hostCookie = cookie
         hostUrl = ready.url
         void removeLegacyHostCookies(session.defaultSession.cookies, ready.url)

@@ -12,7 +12,7 @@
   ],
   "references": [
     { "path": "../../team/agent-team" },
-    {
+        {
       "path": "../../../vendor/cordis"
     },
     {
@@ -109,9 +109,9 @@
       "path": "../../boot/plugin-market"
     },
     {
-      "path": "../../document/office-to-pdf"
+      "path": "../../document/office-kit"
     },
-    {
+        {
       "path": "../../web/web"
     }
   ]
