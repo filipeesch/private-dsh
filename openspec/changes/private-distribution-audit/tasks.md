@@ -35,14 +35,14 @@
 
 ## 7. Upstream synchronization
 
-- [ ] 7.1 Merge `upstream/master` into the working branch and resolve the 273 conflicted paths by area (telemetry and analytics, account, uploads and identifiers, web and desktop, CI and workflows, docs and catalogs), keeping the deletion on delete/modify and rename/delete conflicts, with one follow-up commit per area. Verify `git ls-files -u | wc -l` reports zero and the merge commit records both parents.
-- [ ] 7.2 Delete again the 11 re-introduced packages, the three new packaging and rollout workflows, and the upgrade guides for account surfaces this distribution does not ship. Verify `pnpm verify-private-distribution` passes and none of the 11 package directories exist.
-- [ ] 7.3 Run `pnpm install`, `pnpm run build:artifacts`, and `pnpm run build:check` on the merged tree, fixing whatever the merge broke in typecheck or bundling. Verify all three commands exit zero.
-- [ ] 7.4 Re-record the baseline where the merge legitimately moved or added accepted occurrences, and review that diff entry by entry. Verify the recorded set contains no entry under a package the audit should have rejected.
-- [ ] 7.5 Run the affected package tests, `pnpm run hygiene`, and the documentation gates. Verify each command exits zero and report exactly which commands ran.
+- [x] 7.1 Merge `upstream/master` into the working branch and resolve the 273 conflicted paths by area (telemetry and analytics, account, uploads and identifiers, web and desktop, CI and workflows, docs and catalogs), keeping the deletion on delete/modify and rename/delete conflicts, with one follow-up commit per area. Verify `git ls-files -u | wc -l` reports zero and the merge commit records both parents.
+- [x] 7.2 Delete again the 11 re-introduced packages, the three new packaging and rollout workflows, and the upgrade guides for account surfaces this distribution does not ship. Verify `pnpm verify-private-distribution` passes and none of the 11 package directories exist.
+- [x] 7.3 Run `pnpm install`, `pnpm run build:artifacts`, and `pnpm run build:check` on the merged tree, fixing whatever the merge broke in typecheck or bundling. Verify all three commands exit zero.
+- [x] 7.4 Re-record the baseline where the merge legitimately moved or added accepted occurrences, and review that diff entry by entry. Verify the recorded set contains no entry under a package the audit should have rejected.
+- [x] 7.5 Run the affected package tests, `pnpm run hygiene`, and the documentation gates. Verify each command exits zero and report exactly which commands ran.
 
 ## 8. Review evidence
 
-- [ ] 8.1 Run the post-merge host sweep from `PRIVATE.md` and review every literal host the merged tree gained, deciding for each whether it is a protocol namespace, a provider default, package metadata, or an outbound path to remove. Verify the reviewed inventory is recorded in the pull request body.
-- [ ] 8.2 Audit each new upstream package that could reach the network (`host/authentication-token`, `host/authentication-desktop`, `document/office-kit`, `experimental/cua-mcp`, `experimental/deepseek-chat-import`) and confirm none sends data out except through a declared transport seam. Verify the conclusion for each package is recorded in the pull request body.
-- [ ] 8.3 Open the single pull request carrying the audit output, the host inventory, and the per-package conclusions, and confirm the required `private-ci passed` check is green. Verify the check is green on the final commit.
+- [x] 8.1 Run the post-merge host sweep from `PRIVATE.md` and review every literal host the merged tree gained, deciding for each whether it is a protocol namespace, a provider default, package metadata, or an outbound path to remove. Verify the reviewed inventory is recorded in the pull request body.
+- [x] 8.2 Audit each new upstream package that could reach the network (`host/authentication-token`, `host/authentication-desktop`, `document/office-kit`, `experimental/cua-mcp`, `experimental/deepseek-chat-import`) and confirm none sends data out except through a declared transport seam. Verify the conclusion for each package is recorded in the pull request body.
+- [x] 8.3 Open the single pull request carrying the audit output, the host inventory, and the per-package conclusions, and confirm the required `private-ci passed` check is green. Verify the check is green on the final commit.
