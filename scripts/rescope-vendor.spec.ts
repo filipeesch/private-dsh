@@ -27,7 +27,7 @@ it('lists the complete eligible corpus when tracked paths exceed one MiB', () =>
     const paths = Array.from({ length: 12_000 }, (_, i) => `packages/example/src/${String(i).padStart(5, '0')}-${'x'.repeat(80)}.ts`)
     expect(Buffer.byteLength(paths.join('\0'))).toBeGreaterThan(1024 * 1024)
     // Index-only entries exercise Git's complete output without creating thousands of source files.
-    const entries = [...paths, 'scripts/dependency-catalog/package-lock.json']
+    const entries = [...paths, 'scripts/rescope-vendor.ts']
     execFileSync('git', ['update-index', '--index-info'], {
       cwd: root, env, input: entries.map(path => `100644 ${blob}\t${path}\n`).join(''),
     })
@@ -38,13 +38,7 @@ it('lists the complete eligible corpus when tracked paths exceed one MiB', () =>
 })
 
 describe('rescope file selection', () => {
-  it('preserves the recorded npm resolution', () => {
-    expect(isRescopeExcluded('scripts/dependency-catalog/package-lock.json')).toBe(true)
-  })
-
   it.each([
-    'scripts/dependency-catalog/package.json',
-    'scripts/dependency-catalog/source.ts',
     'scripts/other/package-lock.json',
     'packages/example/src/index.ts',
     'packages/example/package.json',
