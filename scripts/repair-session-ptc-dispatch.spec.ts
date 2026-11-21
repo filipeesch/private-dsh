@@ -121,6 +121,11 @@ function rowsOf(events: readonly SessionEvent[]): Record<string, unknown>[] {
   return JSON.parse(JSON.stringify(events)) as Record<string, unknown>[]
 }
 
+/** Build one typed event from a plain row, as the log decoder would. */
+function eventOf(row: Record<string, unknown>): SessionEvent {
+  return JSON.parse(JSON.stringify(row)) as SessionEvent
+}
+
 /** The plain data object of one typed event, as JSON sees it. */
 function dataOf(event: SessionEvent): Record<string, unknown> {
   return JSON.parse(JSON.stringify(event.data)) as Record<string, unknown>
@@ -135,6 +140,34 @@ function withoutIds(value: unknown): unknown {
     out[key] = key === 'subCallId' || key === 'parentCallId' || key === 'callId' ? '*' : withoutIds(nested)
   }
   return out
+}
+
+/** Mark the repeated invocation's `call-x:ptc:2` dispatch as a timed question and answer it. */
+function answeredQuestion(events: readonly SessionEvent[], everyOccurrence: boolean): SessionEvent[] {
+  const starts = events
+    .map((event, index) => ({ event, index }))
+    .filter(entry => entry.event.type === 'tool/ptc-dispatch-start'
+      && dataOf(entry.event)['subCallId'] === 'call-x:ptc:2')
+  const marked = everyOccurrence ? starts : starts.slice(-1)
+  const asked = events.map((event, index) => marked.some(start => start.index === index)
+    ? eventOf({ ...event, data: { ...dataOf(event), name: 'ask_user_question' } })
+    : event)
+  asked.push(eventOf({
+    type: 'user/message', seq: asked.length, time: asked.length + 1, surfaceOp: 'append',
+    data: { id: 'reply', role: 'user', source: { kind: 'user-question-reply', callId: 'call-x:ptc:2' }, content: [] },
+  }))
+  return asked.map((event, index) => ({ ...event, seq: SessionSeq(index), time: index + 1 }))
+}
+
+/** The recorded reply source that settles a timed program question. */
+function questionReply(rows: readonly Record<string, unknown>[]): Record<string, unknown> | undefined {
+  for (const row of rows) {
+    const source = (row['data'] as Record<string, unknown> | undefined)?.['source']
+    if (typeof source === 'object' && source !== null && (source as Record<string, unknown>)['kind'] === 'user-question-reply') {
+      return source as Record<string, unknown>
+    }
+  }
+  return undefined
 }
 
 const sessionDirOf = (path: string): string => join(path.split('/session.v')[0]!)
@@ -193,7 +226,7 @@ describe('repair planning', () => {
 
   it('refuses a repeated start that no program invocation encloses', () => {
     const rows = collidingEvents().filter(event => event.type !== 'tool/call' && event.type !== 'tool/result')
-    expect(() => planRepairs(lines(rowsOf(rows)))).toThrow(/no enclosing program invocation/)
+    expect(() => planRepairs(lines(rowsOf(rows)))).toThrow(/outside the supported repair pattern/)
   })
 })
 
@@ -297,6 +330,27 @@ describe('stored Session repair', () => {
     } finally {
       await read.close()
     }
+  })
+
+  it('renames the reply a timed program question waits for', async () => {
+    const sessions = await tempRoot()
+    // Only the repeated invocation asks, so the reply can only be its answer.
+    const path = await realLog(sessions, answeredQuestion(collidingEvents(), false))
+
+    const outcome = await repairSessionLog(path, { apply: true, backupRoot: join(sessions, 'backups') })
+
+    expect(outcome.status).toBe('repaired')
+    expect(questionReply(await decodeAll(path))?.['callId']).toBe('call-x:ptc:2#1')
+  })
+
+  it('refuses a reply two questions could own', async () => {
+    const sessions = await tempRoot()
+    // Both invocations asked the same id, so the answer is ambiguous.
+    const path = await realLog(sessions, answeredQuestion(collidingEvents(), true))
+
+    const outcome = await repairSessionLog(path, { apply: true, backupRoot: join(sessions, 'backups') })
+
+    expect([outcome.status, outcome.reason]).toEqual(['failed', expect.stringContaining('could settle either question')])
   })
 
   it('refuses a job settlement no registration proves', async () => {

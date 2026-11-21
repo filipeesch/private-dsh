@@ -113,7 +113,10 @@ export function parseRepairArguments(argv: readonly string[], home: string = res
 }
 
 /** Recorded id field one event type carries. */
-type IdSlot = { readonly where: 'data'; readonly key: string } | { readonly where: 'toolCall'; readonly key: 'callId' }
+type IdSlot =
+  | { readonly where: 'data'; readonly key: string }
+  | { readonly where: 'toolCall'; readonly key: 'callId' }
+  | { readonly where: 'source'; readonly key: 'callId' }
 
 /** Read one recursively owned object, or undefined. */
 function objectAt(value: unknown): Record<string, unknown> | undefined {
@@ -134,10 +137,15 @@ function slotValues(row: StoredRow): string[] {
 /** Event types whose ids this command may rewrite. */
 const DISPATCH_TYPES = new Set(['tool/ptc-dispatch-start', 'tool/ptc-dispatch'])
 
+/** The answer a timed program question records when the user replies. */
+const QUESTION_REPLY_TYPE = 'user/message'
+
 /** The only id fields one event type records, so a rewrite cannot touch another meaning. */
 function slotsFor(type: string): readonly IdSlot[] {
   if (DISPATCH_TYPES.has(type)) return [{ where: 'data', key: 'subCallId' }, { where: 'data', key: 'parentCallId' }]
   if (LATE_REFERENCE_TYPES.has(type)) return [{ where: 'toolCall', key: 'callId' }]
+  // A user-question reply settles the dispatch its `source.callId` names.
+  if (type === QUESTION_REPLY_TYPE) return [{ where: 'source', key: 'callId' }]
   return []
 }
 
@@ -260,9 +268,11 @@ export function planRepairs(lines: readonly StoredLine[]): PlannedRename[] {
     if (typeof subCallId !== 'string') continue
     const seenBefore = starts.some(other => other.index < entry.index && other.row.data['subCallId'] === subCallId)
     if (!seenBefore) continue
-    const covered = plans.some(plan => plan.from === subCallId && entry.index >= plan.window.start && entry.index <= plan.window.end)
-    const attributed = windows.some(window => entry.index >= window.start && entry.index <= window.end)
-    if (!covered && !attributed) throw new Error(`repeated sub-call ${subCallId} at row ${entry.index + 1} has no enclosing program invocation`)
+    const covering = plans.filter(plan => plan.from === subCallId
+      && entry.index >= plan.window.start && entry.index <= plan.window.end)
+    if (covering.length === 0) {
+      throw new Error(`repeated sub-call ${subCallId} at row ${entry.index + 1} is outside the supported repair pattern`)
+    }
   }
   return plans
 }
@@ -330,8 +340,39 @@ function rowRenames(lines: readonly StoredLine[], plans: readonly PlannedRename[
       assign(index, plan.from, plan.to)
     }
   }
-  const owners = jobOwners(lines, plans, windows)
+  // A timed program question settles by the sub-call id its reply names. The
+  // reply may arrive long after the invocation, so ownership is proved by the
+  // absence of an earlier pending question on the same id.
+  for (const [index, entry] of lines.entries()) {
+    const row = entry.row
+    if (row?.type !== QUESTION_REPLY_TYPE) continue
+    const reference = objectAt(row.data['source'])?.['callId']
+    if (typeof reference !== 'string') continue
+    const plan = plans.find(candidate => candidate.from === reference)
+    if (plan === undefined) continue
+    const earlierQuestion = lines.some((candidate, position) => position < plan.window.start
+      && candidate.row?.type === 'tool/ptc-dispatch-start'
+      && candidate.row.data['subCallId'] === reference
+      && candidate.row.data['name'] === 'ask_user_question')
+    if (earlierQuestion) {
+      throw new Error(`reply at row ${index + 1} could settle either question named ${reference}`)
+    }
+    assign(index, plan.from, plan.to)
+  }
   const claimed = new Set(plans.map(plan => plan.from))
+  // Any other record that names a renumbered sub-call — a queued copy of a
+  // reply, a projection record, a deliverable — would silently point at the
+  // wrong dispatch, so the command refuses instead of leaving it behind.
+  const handled = (type: string): boolean => DISPATCH_TYPES.has(type) || LATE_REFERENCE_TYPES.has(type) || type === QUESTION_REPLY_TYPE
+  for (const [index, entry] of lines.entries()) {
+    const row = entry.row
+    if (row === undefined || handled(row.type)) continue
+    const reference = referencedCallIds(row.data).find(value => claimed.has(value))
+    if (reference !== undefined) {
+      throw new Error(`row ${index + 1} names the renumbered sub-call ${reference} in a field this command does not rewrite`)
+    }
+  }
+  const owners = jobOwners(lines, plans, windows)
   for (const [index, entry] of lines.entries()) {
     const row = entry.row
     if (row === undefined || !LATE_REFERENCE_TYPES.has(row.type)) continue
@@ -348,6 +389,17 @@ function rowRenames(lines: readonly StoredLine[], plans: readonly PlannedRename[
     assign(index, owner.plan.from, owner.plan.to)
   }
   return perRow
+}
+
+/** Every value recorded under a `callId` key anywhere in one row. */
+function referencedCallIds(value: unknown, found: string[] = []): string[] {
+  if (Array.isArray(value)) { for (const item of value) referencedCallIds(item, found); return found }
+  if (typeof value !== 'object' || value === null) return found
+  for (const [key, nested] of Object.entries(value)) {
+    if (key === 'callId' && typeof nested === 'string') found.push(nested)
+    else referencedCallIds(nested, found)
+  }
+  return found
 }
 
 /** One decoded stored log: its rows and the frame that held each row. */
