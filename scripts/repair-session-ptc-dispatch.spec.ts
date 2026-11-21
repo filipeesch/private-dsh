@@ -35,7 +35,7 @@ async function tempRoot(): Promise<string> {
 const callId = 'call-x'
 
 /** Valid V4 events for two consecutive program invocations that reuse one call id. */
-function collidingEvents(): SessionEvent[] {
+function collidingEvents(steps: readonly number[] = [1, 2]): SessionEvent[] {
   const events: SessionEvent[] = []
   let seq = 0
   const append = (type: SessionEvent['type'], data: Record<string, unknown>, surface = false): void => {
@@ -53,7 +53,7 @@ function collidingEvents(): SessionEvent[] {
   append('turn/start', { turn: 1 })
   append('user/message', { id: 'input', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'run' }] }, true)
   append('request/header', { reason: 'initial', header: { config: { provider: 'mock', model: 'mock' } } })
-  for (const step of [1, 2]) {
+  for (const step of steps) {
     append('step/start', { turn: 1, step })
     append('assistant/message', {
       turn: 1, step, stream: [],
@@ -65,10 +65,10 @@ function collidingEvents(): SessionEvent[] {
     append('tool/call', { turn: 1, step, callId, name: 'run_code', arguments: '{"code":"x"}' })
     dispatch('call-x:ptc:1')
     dispatch('call-x:ptc:2')
-    if (step === 2) {
-      // A nested program dispatched by the repeated invocation.
+    if (step !== steps[0]) {
+      // A nested program dispatched by a repeated invocation.
       dispatch('call-x:ptc:1:ptc:1', 'call-x:ptc:1', 'nested')
-      append('job/registered', { jobId: 'job-2', toolCall: { callId: 'call-x:ptc:1', rootCallId: callId } })
+      append('job/registered', { jobId: `job-${step}`, toolCall: { callId: 'call-x:ptc:1', rootCallId: callId } })
     } else {
       // A job registered by the invocation the repair leaves unchanged.
       append('job/registered', { jobId: 'job-first', toolCall: { callId: 'call-x:ptc:1', rootCallId: callId } })
@@ -82,7 +82,9 @@ function collidingEvents(): SessionEvent[] {
   // Both jobs settle after their invocations; each must follow the invocation
   // that registered its jobId, not the position it settles in.
   append('job/settled', { jobId: 'job-first', status: 'completed', toolCall: { callId: 'call-x:ptc:1', rootCallId: callId } })
-  append('job/settled', { jobId: 'job-2', status: 'completed', toolCall: { callId: 'call-x:ptc:1', rootCallId: callId } })
+  for (const step of steps.slice(1)) {
+    append('job/settled', { jobId: `job-${step}`, status: 'completed', toolCall: { callId: 'call-x:ptc:1', rootCallId: callId } })
+  }
   append('turn/end', { turn: 1, reason: { kind: 'completed' } })
   return events
 }
@@ -375,18 +377,10 @@ describe('stored Session repair', () => {
 
   it('refuses a reply three invocations could own', async () => {
     const sessions = await tempRoot()
-    // Three invocations mint the same id; the reply cannot name one of them.
-    const base = answeredQuestion(collidingEvents(), false)
-    const third = base.slice(5, 12).map((event, index) => ({
-      ...event, seq: SessionSeq(base.length + index), time: base.length + index + 1,
-    }))
-    const path = await realLog(sessions, [...base, ...third])
+    // Three complete invocations mint the same id; the reply cannot name one.
+    const path = await realLog(sessions, answeredQuestion(collidingEvents([1, 2, 3]), false))
 
-    const planned = await repairSessionLog(path, { apply: false, backupRoot: join(sessions, 'backups') })
-    const applied = await repairSessionLog(path, { apply: true, backupRoot: join(sessions, 'backups') })
-
-    expect(planned.status).toBe('failed')
-    expect(applied.status).toBe('failed')
+    await expectRefused(path, join(sessions, 'backups'), /outside this command's repair scope/)
   })
 
   it('refuses a job settlement no registration proves', async () => {

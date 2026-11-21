@@ -55,7 +55,7 @@ The Session format reader MUST continue to reject a log whose `tool/ptc-dispatch
 
 ### Requirement: Supported repair of colliding PTC dispatch ids
 
-A supported command MUST be able to repair a stored Session log whose PTC dispatch ids collide, by renumbering only the ids of the later colliding invocation, without changing any other recorded value.
+A supported command MUST be able to repair a stored Session log whose PTC dispatch ids collide, by renumbering only the ids of the later colliding invocation, without changing any other recorded value. Repair is supported only when every record that names a renumbered id is one the command knows how to rewrite; a log whose answer to a timed program question names a renumbered id MUST be refused instead, because the question projection joins replies by the exact sub-call id.
 
 #### Scenario: Dry run reports and writes nothing
 
@@ -66,6 +66,11 @@ A supported command MUST be able to repair a stored Session log whose PTC dispat
 
 - **WHEN** the command runs against a colliding log with the write confirmation
 - **THEN** it writes a backup of the original, replaces only the colliding ids, keeps every other value and the record order unchanged, keeps the stored encoding valid, and verifies that no start id repeats afterwards
+
+#### Scenario: A reply to a timed question must refuse, not guess
+
+- **WHEN** the command runs against a colliding log whose renumbered invocation asked a timed program question that was answered, whether the reply was recorded on the surface or queued through the agent inbox
+- **THEN** both the dry run and the write mode refuse that Session and leave its bytes unchanged
 
 #### Scenario: Root tool-call ids are never renumbered
 
