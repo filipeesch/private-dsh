@@ -98,7 +98,7 @@ describe('registered program tool factory', () => {
     const starts = session.snapshotEvents()
       .filter(event => event.type === 'tool/ptc-dispatch-start')
       .map(event => String(event.data.subCallId))
-    expect(starts).toEqual(['program:ptc:2:7:1', 'program:ptc:2:8:1'])
+    expect(starts).toEqual(['program:ptc-2026-11:2:7:1', 'program:ptc-2026-11:2:8:1'])
   })
 
   it.each(['python', 'ruby', 'constructor'])('rejects unsupported runtime %s before creating a program tool', async (language) => {
@@ -213,7 +213,7 @@ describe('registered program tool factory', () => {
     const events = session.snapshotEvents().filter(event => event.type === 'tool/ptc-dispatch-start' || event.type === 'tool/ptc-dispatch')
     expect(events.map(event => event.type)).toEqual(['tool/ptc-dispatch-start', 'tool/ptc-dispatch'])
     expect(events[1]?.data).toMatchObject({
-      rootCallId: 'program', parentCallId: 'program', subCallId: 'program:ptc:1', name: 'capture', arguments: {},
+      rootCallId: 'program', parentCallId: 'program', subCallId: 'program:ptc-2026-11:1', name: 'capture', arguments: {},
       isError: false, content: [{ type: 'text', text: 'durable screenshot preview' }], meta: { screen: 1 },
     })
   })

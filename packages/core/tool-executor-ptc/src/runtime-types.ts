@@ -19,9 +19,10 @@ export interface PtcDispatchLog {
   /** The calling agent (the scope routing key and the spill owner), when the outer call has one. */
   readonly agent?: Agent
   /**
-   * Opaque sub-call id: a root dispatch uses `<parent>:ptc:<turn>:<step>:<n>`, a
-   * nested one `<parentSubCallId>+<n>`, and a call outside a model step keeps
-   * `<parent>:ptc:<n>`.
+   * Opaque sub-call id: a root dispatch uses
+   * `<parent>:ptc-2026-11:<turn>:<step>:<n>`, a nested one
+   * `<parentSubCallId>+<n>`, and a call outside a model step keeps
+   * `<parent>:ptc-2026-11:<n>`.
    */
   readonly subCallId: ToolCallId
   /** The dispatched sub-tool name. */

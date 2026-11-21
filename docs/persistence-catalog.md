@@ -1143,7 +1143,7 @@ Source: [`packages/core/tool-executor-ptc/src/types.ts:64`](../packages/core/too
 /**
  * One sub-dispatch STARTING inside a `run_code` program: the parent
  * `run_code` call id, the opaque sub-call id (a root dispatch uses
- * `<parent>:ptc:<turn>:<step>:<n>`, a nested one `<parentSubCallId>+<n>`,
+ * `<parent>:ptc-2026-11:<turn>:<step>:<n>`, a nested one `<parentSubCallId>+<n>`,
  * carrying the enclosing call, owning model step, and submission-order
  * attempt, so a provider that reuses one tool-call id across steps cannot
  * repeat an id within the log), and the tool `name` with its

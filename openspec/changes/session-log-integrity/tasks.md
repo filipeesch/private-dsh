@@ -9,7 +9,7 @@
 ## 2. PTC sub-call identity
 
 - [x] 2.1 Extract one helper that derives a sub-call id, and separate the dispatch-attempt counter from the identity it currently doubles as; verify the PTC package unit tests pass.
-- [x] 2.2 Derive a root id from `<callId>:ptc:<turn>:<step>:<n>` when coordinates exist, a nested id from `<parentSubCallId>+<n>`, and the legacy `<callId>:ptc:<n>` shape otherwise; verify unit tests for all three shapes, including the aliasing case where a provider advertises a root id equal to a minted sub-call id.
+- [x] 2.2 Derive a root id from `<callId>:ptc-2026-11:<turn>:<step>:<n>` when coordinates exist, a nested id from `<parentSubCallId>+<n>`, and the legacy `<callId>:ptc:<n>` shape otherwise; verify unit tests for all three shapes, including the aliasing case where a provider advertises a root id equal to a minted sub-call id.
 - [x] 2.3 Propagate the parent into the executions created for nested program dispatches; verify a program-inside-a-program test keeps every inner id distinct. The alias itself is proved at the id-formula level in `sub-call-identity.spec.ts`; no end-to-end batch with two aliasing roots is recorded, because that needs a registered nested program tool and a provider that advertises such a pair.
 - [x] 2.4 Add the regression test with one provider tool-call id reused across consecutive steps: assert distinct start ids and that the produced log is accepted by the real V4 reader.
 - [x] 2.5 Update the PTC package README, the dispatch payload JSDoc, the runtime type JSDoc, and the PTC Agent Note to describe the new id convention while keeping ids documented as opaque; verify with `pnpm run doc-sync`.

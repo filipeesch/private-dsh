@@ -373,8 +373,10 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
     if (!signalShutdown.signal.aborted
       && ctx.fiber.state === FiberState.ACTIVE
       && ctx.get('loader') !== undefined) {
-      appReady.commit()
+      // The readiness callbacks run inside commit(); a buffered stdin EOF there
+      // requests the ordered shutdown, so the flag must already be set.
       bootCommitted = true
+      appReady.commit()
     }
     return { ctx, shutdown }
   } catch (error) {

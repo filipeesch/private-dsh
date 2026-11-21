@@ -153,6 +153,24 @@ describe('process shutdown', () => {
     expect(complete).not.toHaveBeenCalled()
   })
 
+  it('makes a fatal release wait for the reserved steps before it resolves', async () => {
+    const order: string[] = []
+    const exit = vi.fn()
+    const shutdown = createProcessShutdown([
+      { name: 'quiesce', run: () => new Promise<void>(() => {}) },
+      { name: 'flush', barrier: true, run: async () => { order.push('barrier') } },
+    ], { forceExit: exit, report: () => {}, timeoutMs: 200, barrierBudgetMs: 40, childBudgetMs: 40 })
+
+    shutdown.interrupt(130)
+    // The fatal handler's release; it must not resolve before the barrier.
+    const release = shutdown.shutdown(1)
+    await release
+
+    expect(order).toEqual(['barrier'])
+    expect(exit).toHaveBeenCalledOnce()
+    expect(exit).toHaveBeenCalledWith(130)
+  })
+
   it('runs the barrier and the remaining phases when a phase stalls, then exits inside the deadline', async () => {
     const order: string[] = []
     const exit = vi.fn()

@@ -138,14 +138,22 @@ function slotValues(row: StoredRow): string[] {
   return values
 }
 
-/** Rewrite known id slots; every envelope field and every other value stay untouched. */
-function rewriteSlots(row: StoredRow, renames: ReadonlyMap<string, string>): Record<string, unknown> {
+/** Id slots a rewrite may touch: the invocation's own rows, or a late job record. */
+const WINDOW_SLOTS: readonly IdSlot[] = ID_SLOTS
+const TAIL_SLOTS: readonly IdSlot[] = [{ where: 'toolCall', key: 'callId' }]
+
+/** Rewrite the selected id slots; every envelope field and every other value stay untouched. */
+function rewriteSlots(
+  row: StoredRow,
+  renames: ReadonlyMap<string, string>,
+  slots: readonly IdSlot[] = LATE_REFERENCE_TYPES.has(row.type) ? TAIL_SLOTS : WINDOW_SLOTS,
+): Record<string, unknown> {
   const mapped = (value: unknown): unknown => {
     const next = typeof value === 'string' ? renames.get(value) : undefined
     return next ?? value
   }
   const data: Record<string, unknown> = { ...row.data }
-  for (const slot of ID_SLOTS) {
+  for (const slot of slots) {
     if (slot.where === 'data') {
       data[slot.key] = mapped(data[slot.key])
       continue
@@ -265,6 +273,9 @@ export function planRepairs(lines: readonly StoredLine[]): PlannedRename[] {
   return plans
 }
 
+/** Event types whose id fields may reference a sub-call after its invocation. */
+const LATE_REFERENCE_TYPES = new Set(['job/registered', 'job/settled'])
+
 /** Build the per-row rename maps from the plan. */
 function rowRenames(lines: readonly StoredLine[], plans: readonly PlannedRename[]): Map<number, Map<string, string>> {
   const perRow = new Map<number, Map<string, string>>()
@@ -273,13 +284,9 @@ function rowRenames(lines: readonly StoredLine[], plans: readonly PlannedRename[
       const row = lines[index]?.row
       if (row === undefined) continue
       const inWindow = index <= plan.window.end
+      if (!inWindow && !LATE_REFERENCE_TYPES.has(row.type)) continue
       const values = inWindow ? slotValues(row) : slotValues(row).filter(value => value === plan.from)
       if (!values.includes(plan.from)) continue
-      if (!inWindow) {
-        // Outside the invocation only late records that join the id may follow
-        // it; sub-call start/settlement rows belong to another invocation.
-        if (row.type === 'tool/ptc-dispatch-start' || row.type === 'tool/ptc-dispatch') continue
-      }
       const existing = perRow.get(index) ?? new Map<string, string>()
       const previous = existing.get(plan.from)
       if (previous !== undefined && previous !== plan.to) {
@@ -418,6 +425,7 @@ export async function repairSessionLog(
   const sessionDir = dirname(path)
   const sessionId = brandString<SessionId>(basename(sessionDir).replace(/^session-/, ''))
   let lease: SessionWriteLease | undefined
+  let outcome: SessionRepairOutcome
   try {
     if (options.apply) {
       // The claim is taken before any read: a writer that appends and releases
@@ -443,14 +451,24 @@ export async function repairSessionLog(
     // Publication is the last step, so a rejection here means nothing was
     // replaced; the reason therefore always describes a file left untouched.
     await publish(path, bytes, repaired, options.backupRoot)
-    return { path, status: 'repaired', renames }
+    outcome = { path, status: 'repaired', renames }
   } catch (error: unknown) {
     const refused = error instanceof Error && error.name === 'SessionAlreadyOwnedError'
     const message = error instanceof Error ? error.message : String(error)
-    return { path, status: refused ? 'refused' : 'failed', renames: [], reason: message }
-  } finally {
-    await lease?.release()
+    outcome = { path, status: refused ? 'refused' : 'failed', renames: [], reason: message }
   }
+  if (lease !== undefined) {
+    try {
+      await lease.release()
+    } catch (error: unknown) {
+      // A replacement that already committed stays reported as such; the claim
+      // failure is surfaced instead of aborting the rest of the corpus.
+      const detail = error instanceof Error ? error.message : String(error)
+      const prefix = outcome.reason === undefined ? '' : `${outcome.reason}; `
+      outcome = { ...outcome, reason: `${prefix}the write claim could not be released: ${detail}` }
+    }
+  }
+  return outcome
 }
 
 /**
@@ -511,12 +529,14 @@ if (isMain) {
     process.stdout.write(`${outcome.status}: ${outcome.path}${outcome.reason === undefined ? '' : ` (${outcome.reason})`}\n`)
     for (const rename of outcome.renames) process.stdout.write(`  ${rename.from} -> ${rename.to}\n`)
   }
-  const report = join(tmpdir(), `dsh-repair-sessions-ptc-${Date.now()}.log`)
-  await writeFile(report, outcomes.map(outcome => `${JSON.stringify(outcome)}\n`).join(''))
+  if (args.apply) {
+    const report = join(tmpdir(), `dsh-repair-sessions-ptc-${Date.now()}.log`)
+    await writeFile(report, outcomes.map(outcome => `${JSON.stringify(outcome)}\n`).join(''))
+    process.stdout.write(`report: ${report}\n`)
+  }
   process.stdout.write(
     `repair:sessions-ptc: ${counts.repaired} repaired, ${counts.planned} planned, ${counts.clean} clean, `
-    + `${counts.refused} refused, ${counts.failed} failed${args.apply ? '' : ' (dry run)'}\n`
-    + `report: ${report}\n`,
+    + `${counts.refused} refused, ${counts.failed} failed${args.apply ? '' : ' (dry run)'}\n`,
   )
   if (counts.failed > 0) process.exit(1)
 }

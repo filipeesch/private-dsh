@@ -67,22 +67,29 @@ function runCodeFlavor(language: string, outputInstruction: string, execution = 
  *
  * Two disjoint shapes keep every recorded id unique without trusting any
  * provider-chosen string twice. A model-step call uses
- * `<callId>:ptc:<turn>:<step>:<n>`: the reader already forbids one advertised
+ * `<callId>:ptc-2026-11:<turn>:<step>:<n>`: the reader already forbids one advertised
  * call id inside a step, so only a different step can reuse the id. A nested
  * dispatch — one whose own execution already carries a parent — uses
  * `<parentSubCallId>+<n>`, so a provider that advertises a root id shaped like
  * a minted sub-call id cannot make two nested ids coincide. A call outside a
- * model step keeps the legacy `<callId>:ptc:<n>` shape.
+ * model step keeps the legacy `<callId>:ptc-2026-11:<n>` shape.
  * @param exec - the enclosing execution: its call id, step coordinates, and parent token.
  * @param attempt - one-based dispatch attempt ordinal within the program.
  * @returns the opaque sub-call id.
  */
-export function ptcSubCallId(exec: Pick<ToolRunContext, 'callId' | 'position' | 'parent'>, attempt: number): ToolCallId {
+export function ptcSubCallId(
+  exec: Pick<ToolRunContext, 'callId' | 'position' | 'parent'>,
+  attempt: number,
+): ToolCallId {
   const callId = String(exec.callId)
+  // Nested dispatches use `+`, a separator no earlier release minted, and root
+  // ids carry a versioned marker: every id an earlier release could record has
+  // either `:ptc:` or `+` in that position, so a reopened log cannot contain the
+  // id this release mints.
   if (exec.parent !== undefined) return brandString<ToolCallId>(`${callId}+${attempt}`)
   return brandString<ToolCallId>(exec.position === undefined
-    ? `${callId}:ptc:${attempt}`
-    : `${callId}:ptc:${exec.position.turn}:${exec.position.step}:${attempt}`)
+    ? `${callId}:ptc-2026-11:${attempt}`
+    : `${callId}:ptc-2026-11:${exec.position.turn}:${exec.position.step}:${attempt}`)
 }
 
 const TYPESCRIPT_OUTPUT_INSTRUCTION = 'Show selected text and images with inspect(...values).'

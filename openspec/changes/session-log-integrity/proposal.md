@@ -6,7 +6,7 @@ The Session log is the durable source of truth for a Session, and two shipped de
 
 ## What Changes
 
-- Derive each PTC sub-call id from the enclosing model step, so identity is unique by construction instead of depending on provider behaviour: `<callId>:ptc:<turn>:<step>:<n>` for a model-step call and `<parentSubCallId>+<n>` for a nested dispatch, so a provider id that looks like a minted one cannot alias it.
+- Derive each PTC sub-call id from the enclosing model step, so identity is unique by construction instead of depending on provider behaviour: `<callId>:ptc-2026-11:<turn>:<step>:<n>` for a model-step call and `<parentSubCallId>+<n>` for a nested dispatch, so a provider id that looks like a minted one cannot alias it.
 - Carry the owning step coordinates on the tool invocation so the PTC executor receives them, and propagate them into nested `run_code` dispatches.
 - Add a supported offline repair command for logs that already contain colliding dispatch ids: it renumbers only the colliding dispatch ids, recompresses only the affected frames, defaults to a dry run, writes a backup, and self-verifies the result.
 - Make signal handling idempotent: repeated signals join the shutdown already in progress, and forcing happens only when the shutdown deadline expires.

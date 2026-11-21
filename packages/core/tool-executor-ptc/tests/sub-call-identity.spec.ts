@@ -76,9 +76,9 @@ describe('PTC sub-call identity', () => {
   it('carries the owning model step and keeps the legacy shape without one', () => {
     const callId = brandString<ToolCallId>('call-1')
 
-    expect(String(ptcSubCallId({ callId, position: { turn: 2, step: 5 } }, 1))).toBe('call-1:ptc:2:5:1')
-    expect(String(ptcSubCallId({ callId, position: { turn: 2, step: 5 } }, 3))).toBe('call-1:ptc:2:5:3')
-    expect(String(ptcSubCallId({ callId }, 1))).toBe('call-1:ptc:1')
+    expect(String(ptcSubCallId({ callId, position: { turn: 2, step: 5 } }, 1))).toBe('call-1:ptc-2026-11:2:5:1')
+    expect(String(ptcSubCallId({ callId, position: { turn: 2, step: 5 } }, 3))).toBe('call-1:ptc-2026-11:2:5:3')
+    expect(String(ptcSubCallId({ callId }, 1))).toBe('call-1:ptc-2026-11:1')
   })
 
   it('keeps nested ids in a shape no provider id can alias', () => {
@@ -87,9 +87,19 @@ describe('PTC sub-call identity', () => {
     // would otherwise mint the same nested id twice.
     const parent = brandString<ToolCallId>('x:ptc:1:1:1')
     expect(String(ptcSubCallId({ callId: parent, position: { turn: 1, step: 1 } }, 1)))
-      .toBe('x:ptc:1:1:1:ptc:1:1:1')
+      .toBe('x:ptc:1:1:1:ptc-2026-11:1:1:1')
     expect(String(ptcSubCallId({ callId: parent, parent: Symbol('parent') as never }, 1)))
       .toBe('x:ptc:1:1:1+1')
+  })
+
+  it('cannot reproduce an id an earlier release recorded', () => {
+    // The marker is versioned, so no id an earlier release could mint matches:
+    // those carry `:ptc:` or `+` where this release writes `:ptc-2026-11:`.
+    const callId = brandString<ToolCallId>('call-1')
+    const minted = String(ptcSubCallId({ callId, position: { turn: 2, step: 5 } }, 1))
+
+    expect(minted).not.toBe('call-1:ptc:2:5:1')
+    expect(minted).not.toContain(':ptc:')
   })
 
   it('keeps ids distinct when a provider reuses one call id across consecutive steps', async () => {
@@ -102,11 +112,11 @@ describe('PTC sub-call identity', () => {
     await runProgram('call-reused', { turn: 1, step: 1 })
     await runProgram('call-reused', { turn: 1, step: 2 })
 
-    expect(startIds(session)).toEqual(['call-reused:ptc:1:1:1', 'call-reused:ptc:1:2:1'])
+    expect(startIds(session)).toEqual(['call-reused:ptc-2026-11:1:1:1', 'call-reused:ptc-2026-11:1:2:1'])
     const settles = session.snapshotEvents()
       .filter(event => event.type === 'tool/ptc-dispatch')
       .map(event => String(event.data.subCallId))
-    expect(settles).toEqual(['call-reused:ptc:1:1:1', 'call-reused:ptc:1:2:1'])
+    expect(settles).toEqual(['call-reused:ptc-2026-11:1:1:1', 'call-reused:ptc-2026-11:1:2:1'])
   })
 
   it('numbers every dispatch inside one program without a step', async () => {
@@ -119,7 +129,7 @@ describe('PTC sub-call identity', () => {
 
     await runProgram('call-1', undefined)
 
-    expect(startIds(session)).toEqual(['call-1:ptc:1', 'call-1:ptc:2'])
+    expect(startIds(session)).toEqual(['call-1:ptc-2026-11:1', 'call-1:ptc-2026-11:2'])
   })
 
   it('produces dispatch records the shipped V4 reader admits', async () => {

@@ -144,7 +144,7 @@ pnpm run migrate:sessions-to-v4
 pnpm run repair:sessions-ptc
 ```
 
-该命令读取 `~/.dsh/sessions` 下已存储的 V3 与 V4 Session 日志（压缩或纯文本）；`--sessions-dir PATH` 选择其他根目录。未传 `--apply` 时为试运行：只列出计划的重命名，不写任何内容。传 `--apply` 时，它先把原始字节复制到 `~/.dsh/session-repair-backups/<session>/<timestamp>/`（`--backup-dir PATH` 选择其他根目录），只重写后一次冲突调用中记录 id 的字段——该调用自己的派发 id、嵌套派发的 parent 引用，以及稍后引用该 id 的 job 记录——然后仅重新压缩发生变化的帧。其余每一行逐字节保持不变，包括 Session 头和每个事件信封。
+该命令读取 `~/.dsh/sessions` 下以 `session.v<version>.jsonl.zstd` 形式存储的 V3 与 V4 压缩 Session 日志；日志的代际来自其记录的头，而不是命令。`--sessions-dir PATH` 选择其他根目录。未传 `--apply` 时为试运行：只列出计划的重命名，不写任何内容。传 `--apply` 时，它先把原始字节复制到 `~/.dsh/session-repair-backups/<session>/<timestamp>/`（`--backup-dir PATH` 选择其他根目录），只重写后一次冲突调用中记录 id 的字段——该调用自己的派发 id、嵌套派发的 parent 引用，以及稍后引用该 id 的 job 记录——然后仅重新压缩发生变化的帧。其余每一行逐字节保持不变，包括 Session 头和每个事件信封。
 
 对以下情况它会拒绝执行且不改动文件：最后一帧不完整的日志、写入占用被活动进程持有的 Session，以及无法归属到某次程序调用的重复 start。单个 Session 失败不会阻止其余 Session；摘要和系统临时目录中的 JSON 报告会列出每个结果。把备份复制回被修复的文件即可恢复。
 

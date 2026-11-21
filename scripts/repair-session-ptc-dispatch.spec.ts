@@ -75,6 +75,9 @@ function collidingEvents(): SessionEvent[] {
     }, true)
     append('step/end', { turn: 1, step })
   }
+  // A late job record outside the final invocation window still names the
+  // renamed sub-call, so the repair must follow it by its tool reference.
+  append('job/registered', { jobId: 'job-late', toolCall: { callId: 'call-x:ptc:1', rootCallId: callId } })
   append('turn/end', { turn: 1, reason: { kind: 'completed' } })
   return events
 }
@@ -111,6 +114,17 @@ async function decodeAll(path: string): Promise<Record<string, unknown>[]> {
 /** Turn typed events into the plain rows the planner reads, as JSON does. */
 function rowsOf(events: readonly SessionEvent[]): Record<string, unknown>[] {
   return JSON.parse(JSON.stringify(events)) as Record<string, unknown>[]
+}
+
+/** Blank every recorded id so two rows can be compared for non-id equality. */
+function withoutIds(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutIds)
+  if (typeof value !== 'object' || value === null) return value
+  const out: Record<string, unknown> = {}
+  for (const [key, nested] of Object.entries(value)) {
+    out[key] = key === 'subCallId' || key === 'parentCallId' || key === 'callId' ? '*' : withoutIds(nested)
+  }
+  return out
 }
 
 const sessionDirOf = (path: string): string => join(path.split('/session.v')[0]!)
@@ -194,16 +208,16 @@ describe('stored Session repair', () => {
       .filter(row => (row['data'] as Record<string, unknown>)?.['name'] === 'nested')
       .map(row => (row['data'] as Record<string, unknown>)['parentCallId'])
     expect(nestedParents).toEqual(['call-x:ptc:1#1', 'call-x:ptc:1#1'])
-    // A late job record that joins the renamed id follows it.
-    const job = after.find(row => row['type'] === 'job/registered')
-    expect((job?.['data'] as Record<string, unknown>)['toolCall']).toEqual({ callId: 'call-x:ptc:1#1', rootCallId: callId })
-    // Everything that is not an id field is untouched.
-    const [beforeDispatch, afterDispatch] = [
-      originalRows.find(row => row['type'] === 'tool/ptc-dispatch'),
-      after.find(row => row['type'] === 'tool/ptc-dispatch'),
-    ]
-    expect({ ...afterDispatch, data: { ...(afterDispatch?.['data'] as Record<string, unknown>), subCallId: undefined } })
-      .toEqual({ ...beforeDispatch, data: { ...(beforeDispatch?.['data'] as Record<string, unknown>), subCallId: undefined } })
+    // Both the in-window job record and the late one join the renamed id.
+    const jobs = after
+      .filter(row => row['type'] === 'job/registered')
+      .map(row => (row['data'] as Record<string, unknown>)['toolCall'])
+    expect(jobs).toEqual([
+      { callId: 'call-x:ptc:1#1', rootCallId: callId },
+      { callId: 'call-x:ptc:1#1', rootCallId: callId },
+    ])
+    // Every row keeps all of its non-id content.
+    expect(after.map(withoutIds)).toEqual(originalRows.map(withoutIds))
 
     const backups = await readdir(join(sessions, 'backups'))
     expect(backups).toEqual(['11111111-1111-4111-8111-111111111111'])

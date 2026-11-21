@@ -108,6 +108,8 @@ export function createProcessShutdown(
   let barrierRun: Promise<void> | undefined
   let stalledPromise: Promise<void> | undefined
   const failedPhases = new Set<string>()
+  /** Phases whose `run` has been entered; re-entering would duplicate its work. */
+  const started = new Set<string>()
 
   /** Diagnostics must never decide whether the shutdown progresses. */
   const safeReport = (message: string): void => {
@@ -155,6 +157,7 @@ export function createProcessShutdown(
   /** Run one phase within `budgetMs`, recording its completion or failure. */
   const runWithin = async (phase: ShutdownPhase, budgetMs: number): Promise<'done' | 'budget' | 'failed'> => {
     currentPhase = phase.name
+    started.add(phase.name)
     let timer: ReturnType<typeof setTimeout> | undefined
     const budget = new Promise<'budget'>((resolve) => {
       timer = setTimeout(() => { resolve('budget') }, Math.max(0, budgetMs))
@@ -200,6 +203,9 @@ export function createProcessShutdown(
     }
     for (const phase of phases) {
       if (phase === barrierPhase || finished.has(phase.name) || failedPhases.has(phase.name)) continue
+      // A phase that is still running after its budget is abandoned, never
+      // started twice: a second run would duplicate teardown work.
+      if (started.has(phase.name)) continue
       if (remainingMs() === 0) break
       await runWithin(phase, Math.min(childBudgetMs, remainingMs()))
     }
@@ -238,7 +244,13 @@ export function createProcessShutdown(
         await stalled()
         return
       }
-      if (stopped) return
+      // A stalled sequence is still running its reserved steps; the request
+      // promise must settle only after them, otherwise a fatal release awaiting
+      // it exits before the barrier.
+      if (stopped) {
+        await stalled()
+        return
+      }
       clearTimers()
       if (exit) forceExitOnce(code)
       else completeOnce(code)
