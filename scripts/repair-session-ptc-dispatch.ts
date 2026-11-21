@@ -551,22 +551,26 @@ export async function repairSessionLog(
     const renames = plans.map(plan => ({ from: plan.from, to: plan.to }))
     if (plans.length === 0) {
       outcome = { path, status: 'clean', renames: [] }
-    } else if (!options.apply) {
-      outcome = { path, status: 'planned', renames }
     } else {
+      // The same per-row plan validates every refusal in a dry run; only
+      // encoding and publication are reserved for apply.
       const perRow = rowRenames(decoded.lines, plans)
-      const rewritten = new Map<number, string>()
-      for (const [index, mapping] of perRow) {
-        const row = decoded.lines[index]?.row
-        if (row === undefined) continue
-        rewritten.set(index, JSON.stringify(rewriteSlots(row, mapping)))
+      if (!options.apply) {
+        outcome = { path, status: 'planned', renames }
+      } else {
+        const rewritten = new Map<number, string>()
+        for (const [index, mapping] of perRow) {
+          const row = decoded.lines[index]?.row
+          if (row === undefined) continue
+          rewritten.set(index, JSON.stringify(rewriteSlots(row, mapping)))
+        }
+        const repaired = await encodeFrames(bytes, decoded.frames, decoded.lines, decoded.lineFrame, rewritten)
+        verifyRewrite(decoded.lines, (await decodeFrames(repaired)).lines, perRow)
+        // Publication is the last step, so a rejection here means nothing was
+        // replaced; the reason therefore always describes a file left untouched.
+        await publish(path, bytes, repaired, options.backupRoot)
+        outcome = { path, status: 'repaired', renames }
       }
-      const repaired = await encodeFrames(bytes, decoded.frames, decoded.lines, decoded.lineFrame, rewritten)
-      verifyRewrite(decoded.lines, (await decodeFrames(repaired)).lines, perRow)
-      // Publication is the last step, so a rejection here means nothing was
-      // replaced; the reason therefore always describes a file left untouched.
-      await publish(path, bytes, repaired, options.backupRoot)
-      outcome = { path, status: 'repaired', renames }
     }
   } catch (error: unknown) {
     const refused = error instanceof Error && error.name === 'SessionAlreadyOwnedError'

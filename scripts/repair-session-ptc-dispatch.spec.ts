@@ -159,6 +159,23 @@ function answeredQuestion(events: readonly SessionEvent[], everyOccurrence: bool
   return asked.map((event, index) => ({ ...event, seq: SessionSeq(index), time: index + 1 }))
 }
 
+/** Queue the reply through the agent inbox, as the application does. */
+function withQueuedReply(events: readonly SessionEvent[]): SessionEvent[] {
+  const queued = [...events]
+  queued.push(eventOf({
+    type: 'agent/inbox/spliced', seq: queued.length, time: queued.length + 1,
+    data: {
+      target: 'next-turn', start: 0,
+      inserted: [{
+        id: 'reply', role: 'user',
+        source: { kind: 'user-question-reply', callId: 'call-x:ptc:2' },
+        content: [{ type: 'text', text: 'yes' }],
+      }],
+    },
+  }))
+  return queued.map((event, index) => ({ ...event, seq: SessionSeq(index), time: index + 1 }))
+}
+
 /** The recorded reply source that settles a timed program question. */
 function questionReply(rows: readonly Record<string, unknown>[]): Record<string, unknown> | undefined {
   for (const row of rows) {
@@ -341,6 +358,21 @@ describe('stored Session repair', () => {
 
     expect(outcome.status).toBe('repaired')
     expect(questionReply(await decodeAll(path))?.['callId']).toBe('call-x:ptc:2#1')
+  })
+
+  it('refuses a queued question reply in both modes and leaves the bytes alone', async () => {
+    const sessions = await tempRoot()
+    const path = await realLog(sessions, withQueuedReply(answeredQuestion(collidingEvents(), false)))
+    const before = await readFile(path)
+
+    const planned = await repairSessionLog(path, { apply: false, backupRoot: join(sessions, 'backups') })
+    expect([planned.status, planned.reason]).toEqual(['failed', expect.stringContaining('does not rewrite')])
+    expect(await readFile(path)).toEqual(before)
+
+    const applied = await repairSessionLog(path, { apply: true, backupRoot: join(sessions, 'backups') })
+    expect(applied.status).toBe('failed')
+    expect(await readFile(path)).toEqual(before)
+    expect(await readdir(sessions)).toHaveLength(1)
   })
 
   it('refuses a reply two questions could own', async () => {
