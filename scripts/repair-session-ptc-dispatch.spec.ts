@@ -78,6 +78,10 @@ function collidingEvents(): SessionEvent[] {
   // A late job record outside the final invocation window still names the
   // renamed sub-call, so the repair must follow it by its tool reference.
   append('job/registered', { jobId: 'job-late', toolCall: { callId: 'call-x:ptc:1', rootCallId: callId } })
+  append('job/settled', { jobId: 'job-late', status: 'completed', toolCall: { callId: 'call-x:ptc:1', rootCallId: callId } })
+  // A job created by the repeated invocation settles after it; its id must
+  // follow the invocation that registered it, not the position it settles in.
+  append('job/settled', { jobId: 'job-2', status: 'completed', toolCall: { callId: 'call-x:ptc:1', rootCallId: callId } })
   append('turn/end', { turn: 1, reason: { kind: 'completed' } })
   return events
 }
@@ -114,6 +118,11 @@ async function decodeAll(path: string): Promise<Record<string, unknown>[]> {
 /** Turn typed events into the plain rows the planner reads, as JSON does. */
 function rowsOf(events: readonly SessionEvent[]): Record<string, unknown>[] {
   return JSON.parse(JSON.stringify(events)) as Record<string, unknown>[]
+}
+
+/** The plain data object of one typed event, as JSON sees it. */
+function dataOf(event: SessionEvent): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(event.data)) as Record<string, unknown>
 }
 
 /** Blank every recorded id so two rows can be compared for non-id equality. */
@@ -208,11 +217,14 @@ describe('stored Session repair', () => {
       .filter(row => (row['data'] as Record<string, unknown>)?.['name'] === 'nested')
       .map(row => (row['data'] as Record<string, unknown>)['parentCallId'])
     expect(nestedParents).toEqual(['call-x:ptc:1#1', 'call-x:ptc:1#1'])
-    // Both the in-window job record and the late one join the renamed id.
+    // Every job record that names the renamed sub-call joins it, however late
+    // it settles and whichever invocation registered it.
     const jobs = after
-      .filter(row => row['type'] === 'job/registered')
+      .filter(row => String(row['type']).startsWith('job/'))
       .map(row => (row['data'] as Record<string, unknown>)['toolCall'])
     expect(jobs).toEqual([
+      { callId: 'call-x:ptc:1#1', rootCallId: callId },
+      { callId: 'call-x:ptc:1#1', rootCallId: callId },
       { callId: 'call-x:ptc:1#1', rootCallId: callId },
       { callId: 'call-x:ptc:1#1', rootCallId: callId },
     ])
@@ -274,6 +286,30 @@ describe('stored Session repair', () => {
     } finally {
       await read.close()
     }
+  })
+
+  it('refuses a job settlement no registration proves', async () => {
+    const sessions = await tempRoot()
+    const events = collidingEvents()
+      .filter(event => !(event.type === 'job/registered' && dataOf(event)['jobId'] === 'job-late'))
+      .map((event, index) => ({ ...event, seq: SessionSeq(index), time: index + 1 }))
+    const path = await realLog(sessions, events)
+
+    const outcome = await repairSessionLog(path, { apply: true, backupRoot: join(sessions, 'backups') })
+
+    expect([outcome.status, outcome.reason]).toEqual(['failed', expect.stringContaining('no registration that proves')])
+  })
+
+  it('releases the write claim after a clean Session', async () => {
+    const sessions = await tempRoot()
+    const path = await realLog(sessions, collidingEvents().slice(0, 6))
+
+    const outcome = await repairSessionLog(path, { apply: true, backupRoot: join(sessions, 'backups') })
+    expect(outcome.status).toBe('clean')
+
+    // A leaked claim would refuse this acquisition.
+    const lease = await SessionWriteLease.acquire(sessionDirOf(path), brandString<SessionId>('clean-check'))
+    await lease.release()
   })
 
   it('refuses a log with an incomplete final frame', async () => {

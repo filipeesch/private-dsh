@@ -112,15 +112,8 @@ export function parseRepairArguments(argv: readonly string[], home: string = res
   return { sessionsDir, apply, backupRoot }
 }
 
-/** Recorded id fields one row can carry. */
-type IdSlot = { readonly where: 'data'; readonly key: string } | { readonly where: 'toolCall'; readonly key: 'callId' } | { readonly where: 'message'; readonly key: 'callId' }
-
-const ID_SLOTS: readonly IdSlot[] = [
-  { where: 'data', key: 'subCallId' },
-  { where: 'data', key: 'parentCallId' },
-  { where: 'data', key: 'callId' },
-  { where: 'toolCall', key: 'callId' },
-]
+/** Recorded id field one event type carries. */
+type IdSlot = { readonly where: 'data'; readonly key: string } | { readonly where: 'toolCall'; readonly key: 'callId' }
 
 /** Read one recursively owned object, or undefined. */
 function objectAt(value: unknown): Record<string, unknown> | undefined {
@@ -130,7 +123,7 @@ function objectAt(value: unknown): Record<string, unknown> | undefined {
 /** Every id one row records in a known slot. */
 function slotValues(row: StoredRow): string[] {
   const values: string[] = []
-  for (const slot of ID_SLOTS) {
+  for (const slot of slotsFor(row.type)) {
     const owner = slot.where === 'data' ? row.data : objectAt(row.data[slot.where])
     const value = owner?.[slot.key]
     if (typeof value === 'string') values.push(value)
@@ -138,22 +131,24 @@ function slotValues(row: StoredRow): string[] {
   return values
 }
 
-/** Id slots a rewrite may touch: the invocation's own rows, or a late job record. */
-const WINDOW_SLOTS: readonly IdSlot[] = ID_SLOTS
-const TAIL_SLOTS: readonly IdSlot[] = [{ where: 'toolCall', key: 'callId' }]
+/** Event types whose ids this command may rewrite. */
+const DISPATCH_TYPES = new Set(['tool/ptc-dispatch-start', 'tool/ptc-dispatch'])
 
-/** Rewrite the selected id slots; every envelope field and every other value stay untouched. */
-function rewriteSlots(
-  row: StoredRow,
-  renames: ReadonlyMap<string, string>,
-  slots: readonly IdSlot[] = LATE_REFERENCE_TYPES.has(row.type) ? TAIL_SLOTS : WINDOW_SLOTS,
-): Record<string, unknown> {
+/** The only id fields one event type records, so a rewrite cannot touch another meaning. */
+function slotsFor(type: string): readonly IdSlot[] {
+  if (DISPATCH_TYPES.has(type)) return [{ where: 'data', key: 'subCallId' }, { where: 'data', key: 'parentCallId' }]
+  if (LATE_REFERENCE_TYPES.has(type)) return [{ where: 'toolCall', key: 'callId' }]
+  return []
+}
+
+/** Rewrite this event type's own id slots; every envelope field and other value stay untouched. */
+function rewriteSlots(row: StoredRow, renames: ReadonlyMap<string, string>): Record<string, unknown> {
   const mapped = (value: unknown): unknown => {
     const next = typeof value === 'string' ? renames.get(value) : undefined
     return next ?? value
   }
   const data: Record<string, unknown> = { ...row.data }
-  for (const slot of slots) {
+  for (const slot of slotsFor(row.type)) {
     if (slot.where === 'data') {
       data[slot.key] = mapped(data[slot.key])
       continue
@@ -212,14 +207,14 @@ function freshId(candidate: string, used: ReadonlySet<string>): string {
   return next
 }
 
-/** One planned rename and the rows it may touch. */
+/** One planned rename and the invocation that owns it. */
 interface PlannedRename {
   readonly from: string
   readonly to: string
-  /** Rows inside the repeated invocation, where every slot may be rewritten. */
+  /** The program call whose rows this rename owns. */
+  readonly callId: string
+  /** Rows of that invocation. */
   readonly window: { readonly start: number; readonly end: number }
-  /** Rows after the invocation that may still reference the old id (late job records). */
-  readonly tailEnd: number
 }
 
 /**
@@ -244,19 +239,18 @@ export function planRepairs(lines: readonly StoredLine[]): PlannedRename[] {
   for (const [order, window] of windows.entries()) {
     const previous = firstWindowByCallId.get(window.callId)
     if (previous === undefined) { firstWindowByCallId.set(window.callId, order); continue }
-    let nextWindowStart = lines.length
-    for (const later of windows.slice(order + 1)) {
-      if (later.callId === window.callId) { nextWindowStart = later.start; break }
-    }
     for (const entry of starts) {
       if (entry.index < window.start || entry.index > window.end) continue
+      // A dispatch belongs to the invocation only when it records that call as
+      // its root; an interleaved program's dispatch does not.
+      if (entry.row.data['rootCallId'] !== window.callId) continue
       const subCallId = entry.row.data['subCallId']
       if (typeof subCallId !== 'string') continue
       const usedBefore = starts.some(other => other.index < window.start && other.row.data['subCallId'] === subCallId)
       if (!usedBefore) continue
       const to = freshId(subCallId, used)
       used.add(to)
-      plans.push({ from: subCallId, to, window: { start: window.start, end: window.end }, tailEnd: nextWindowStart })
+      plans.push({ from: subCallId, to, callId: window.callId, window: { start: window.start, end: window.end } })
     }
   }
   // A start that repeats an id but belongs to no program invocation cannot be
@@ -276,25 +270,68 @@ export function planRepairs(lines: readonly StoredLine[]): PlannedRename[] {
 /** Event types whose id fields may reference a sub-call after its invocation. */
 const LATE_REFERENCE_TYPES = new Set(['job/registered', 'job/settled'])
 
-/** Build the per-row rename maps from the plan. */
+/** Which invocation one job belongs to, decided by its registration row. */
+function jobOwners(
+  lines: readonly StoredLine[],
+  plans: readonly PlannedRename[],
+): Map<string, PlannedRename> {
+  const owners = new Map<string, PlannedRename>()
+  for (const [index, entry] of lines.entries()) {
+    const row = entry.row
+    if (row?.type !== 'job/registered') continue
+    const jobId = row.data['jobId']
+    if (typeof jobId !== 'string') continue
+    const reference = objectAt(row.data['toolCall'])?.['callId']
+    const enclosing = plans.find(plan => index >= plan.window.start && index <= plan.window.end)
+    const claiming = typeof reference === 'string' ? plans.filter(plan => plan.from === reference) : []
+    const owner = enclosing ?? (claiming.length === 1 ? claiming[0] : undefined)
+    if (owner === undefined) {
+      if (claiming.length > 1) {
+        throw new Error(`job ${jobId} at row ${index + 1} could belong to any of ${claiming.length} invocations`)
+      }
+      continue
+    }
+    owners.set(jobId, owner)
+  }
+  return owners
+}
+
+/** Build the per-row rename maps: an invocation's own dispatches, then its jobs. */
 function rowRenames(lines: readonly StoredLine[], plans: readonly PlannedRename[]): Map<number, Map<string, string>> {
   const perRow = new Map<number, Map<string, string>>()
-  for (const plan of plans) {
-    for (let index = plan.window.start; index <= plan.tailEnd && index < lines.length; index += 1) {
-      const row = lines[index]?.row
-      if (row === undefined) continue
-      const inWindow = index <= plan.window.end
-      if (!inWindow && !LATE_REFERENCE_TYPES.has(row.type)) continue
-      const values = inWindow ? slotValues(row) : slotValues(row).filter(value => value === plan.from)
-      if (!values.includes(plan.from)) continue
-      const existing = perRow.get(index) ?? new Map<string, string>()
-      const previous = existing.get(plan.from)
-      if (previous !== undefined && previous !== plan.to) {
-        throw new Error(`row ${index + 1} would take ${plan.from} to two ids`)
-      }
-      existing.set(plan.from, plan.to)
-      perRow.set(index, existing)
+  const assign = (index: number, from: string, to: string): void => {
+    const existing = perRow.get(index) ?? new Map<string, string>()
+    const previous = existing.get(from)
+    if (previous !== undefined && previous !== to) {
+      throw new Error(`row ${index + 1} would take ${from} to two ids`)
     }
+    existing.set(from, to)
+    perRow.set(index, existing)
+  }
+  for (const [index, entry] of lines.entries()) {
+    const row = entry.row
+    if (row === undefined || !DISPATCH_TYPES.has(row.type)) continue
+    const plan = plans.find(candidate => index >= candidate.window.start && index <= candidate.window.end)
+    if (plan === undefined) continue
+    if (row.data['rootCallId'] !== plan.callId) continue
+    if (!slotValues(row).includes(plan.from)) continue
+    assign(index, plan.from, plan.to)
+  }
+  const owners = jobOwners(lines, plans)
+  const claimed = new Set(plans.map(plan => plan.from))
+  for (const [index, entry] of lines.entries()) {
+    const row = entry.row
+    if (row === undefined || !LATE_REFERENCE_TYPES.has(row.type)) continue
+    const reference = objectAt(row.data['toolCall'])?.['callId']
+    const jobId = row.data['jobId']
+    if (typeof jobId !== 'string' || typeof reference !== 'string' || !claimed.has(reference)) continue
+    const owner = owners.get(jobId)
+    if (owner === undefined) {
+      // The job names a renamed sub-call but no registration proves which
+      // invocation created it; rewriting by position would corrupt the pairing.
+      throw new Error(`job ${jobId} at row ${index + 1} has no registration that proves its invocation`)
+    }
+    assign(index, owner.from, owner.to)
   }
   return perRow
 }
@@ -387,6 +424,15 @@ function verifyRewrite(
     if (starts.has(id)) throw new Error(`the repaired log still repeats ${id}`)
     starts.add(id)
   }
+  // A rewritten job reference must still name a dispatch the log records.
+  for (const index of perRow.keys()) {
+    const row = after[index]?.row
+    if (row === undefined || !LATE_REFERENCE_TYPES.has(row.type)) continue
+    const reference = objectAt(row.data['toolCall'])?.['callId']
+    if (typeof reference === 'string' && !starts.has(reference)) {
+      throw new Error(`the repaired log leaves job ${reference} without a dispatch`)
+    }
+  }
 }
 
 function timestamp(): string {
@@ -425,7 +471,8 @@ export async function repairSessionLog(
   const sessionDir = dirname(path)
   const sessionId = brandString<SessionId>(basename(sessionDir).replace(/^session-/, ''))
   let lease: SessionWriteLease | undefined
-  let outcome: SessionRepairOutcome
+  let outcome: SessionRepairOutcome = { path, status: 'failed', renames: [], reason: 'the Session was not processed' }
+  let releaseFailure: string | undefined
   try {
     if (options.apply) {
       // The claim is taken before any read: a writer that appends and releases
@@ -436,39 +483,45 @@ export async function repairSessionLog(
     const decoded = await decodeFrames(bytes)
     const plans = planRepairs(decoded.lines)
     const renames = plans.map(plan => ({ from: plan.from, to: plan.to }))
-    if (plans.length === 0) return { path, status: 'clean', renames: [] }
-    if (!options.apply) return { path, status: 'planned', renames }
-
-    const perRow = rowRenames(decoded.lines, plans)
-    const rewritten = new Map<number, string>()
-    for (const [index, mapping] of perRow) {
-      const row = decoded.lines[index]?.row
-      if (row === undefined) continue
-      rewritten.set(index, JSON.stringify(rewriteSlots(row, mapping)))
+    if (plans.length === 0) {
+      outcome = { path, status: 'clean', renames: [] }
+    } else if (!options.apply) {
+      outcome = { path, status: 'planned', renames }
+    } else {
+      const perRow = rowRenames(decoded.lines, plans)
+      const rewritten = new Map<number, string>()
+      for (const [index, mapping] of perRow) {
+        const row = decoded.lines[index]?.row
+        if (row === undefined) continue
+        rewritten.set(index, JSON.stringify(rewriteSlots(row, mapping)))
+      }
+      const repaired = await encodeFrames(bytes, decoded.frames, decoded.lines, decoded.lineFrame, rewritten)
+      verifyRewrite(decoded.lines, (await decodeFrames(repaired)).lines, perRow)
+      // Publication is the last step, so a rejection here means nothing was
+      // replaced; the reason therefore always describes a file left untouched.
+      await publish(path, bytes, repaired, options.backupRoot)
+      outcome = { path, status: 'repaired', renames }
     }
-    const repaired = await encodeFrames(bytes, decoded.frames, decoded.lines, decoded.lineFrame, rewritten)
-    verifyRewrite(decoded.lines, (await decodeFrames(repaired)).lines, perRow)
-    // Publication is the last step, so a rejection here means nothing was
-    // replaced; the reason therefore always describes a file left untouched.
-    await publish(path, bytes, repaired, options.backupRoot)
-    outcome = { path, status: 'repaired', renames }
   } catch (error: unknown) {
     const refused = error instanceof Error && error.name === 'SessionAlreadyOwnedError'
     const message = error instanceof Error ? error.message : String(error)
     outcome = { path, status: refused ? 'refused' : 'failed', renames: [], reason: message }
-  }
-  if (lease !== undefined) {
-    try {
-      await lease.release()
-    } catch (error: unknown) {
-      // A replacement that already committed stays reported as such; the claim
-      // failure is surfaced instead of aborting the rest of the corpus.
-      const detail = error instanceof Error ? error.message : String(error)
-      const prefix = outcome.reason === undefined ? '' : `${outcome.reason}; `
-      outcome = { ...outcome, reason: `${prefix}the write claim could not be released: ${detail}` }
+  } finally {
+    // Release whatever the path above did, including a clean or dry-run Session
+    // that returned before any write.
+    if (lease !== undefined) {
+      try {
+        await lease.release()
+      } catch (error: unknown) {
+        releaseFailure = error instanceof Error ? error.message : String(error)
+      }
     }
   }
-  return outcome
+  if (releaseFailure === undefined) return outcome
+  // A replacement that already committed stays reported as such; the claim
+  // failure is surfaced instead of aborting the rest of the corpus.
+  const prefix = outcome.reason === undefined ? '' : `${outcome.reason}; `
+  return { ...outcome, reason: `${prefix}the write claim could not be released: ${releaseFailure}` }
 }
 
 /**
