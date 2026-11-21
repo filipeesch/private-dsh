@@ -17,19 +17,8 @@ export function apply(ctx) {
   }
   ctx.effect(() => () => { runtime.release = release })
   ctx.on('tools/execute', async (exec, next) => {
-    if (exec.callId === 'call_keep:ptc-2026-11:1:1:2') {
-      // Keep the tool pending until the program is cancelled, then fail with a
-      // fixed message: an in-flight filesystem call names whichever operation
-      // the abort interrupted, which differs between platforms.
-      if (!exec.signal.aborted) {
-        // Bounded: the scenario must fail the tool even if the cancellation
-        // signal never reaches this dispatch.
-        await Promise.race([
-          new Promise(resolve => exec.signal.addEventListener('abort', resolve, { once: true })),
-          new Promise(resolve => setTimeout(resolve, 5_000)),
-        ])
-      }
-      throw new Error('fixture: pending tool aborted after cancellation')
+    if (exec.callId === 'call_keep:ptc-2026-11:1:1:2' && !exec.signal.aborted) {
+      await new Promise(resolve => exec.signal.addEventListener('abort', resolve, { once: true }))
     }
     const result = await next()
     if (exec.callId === 'call_isolated') {
