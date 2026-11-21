@@ -176,15 +176,22 @@ function withQueuedReply(events: readonly SessionEvent[]): SessionEvent[] {
   return queued.map((event, index) => ({ ...event, seq: SessionSeq(index), time: index + 1 }))
 }
 
-/** The recorded reply source that settles a timed program question. */
-function questionReply(rows: readonly Record<string, unknown>[]): Record<string, unknown> | undefined {
-  for (const row of rows) {
-    const source = (row['data'] as Record<string, unknown> | undefined)?.['source']
-    if (typeof source === 'object' && source !== null && (source as Record<string, unknown>)['kind'] === 'user-question-reply') {
-      return source as Record<string, unknown>
-    }
-  }
-  return undefined
+/** The direct reply that settles a timed program question. */
+function isQuestionReply(event: SessionEvent): boolean {
+  const source = dataOf(event)['source']
+  return event.type === 'user/message' && typeof source === 'object' && source !== null
+    && (source as Record<string, unknown>)['kind'] === 'user-question-reply'
+}
+
+/** Assert both modes refuse a Session and leave its bytes alone. */
+async function expectRefused(path: string, backupRoot: string, pattern: RegExp): Promise<void> {
+  const before = await readFile(path)
+  const planned = await repairSessionLog(path, { apply: false, backupRoot })
+  expect([planned.status, planned.reason]).toEqual(['failed', expect.stringMatching(pattern)])
+  expect(await readFile(path)).toEqual(before)
+  const applied = await repairSessionLog(path, { apply: true, backupRoot })
+  expect(applied.status).toBe('failed')
+  expect(await readFile(path)).toEqual(before)
 }
 
 const sessionDirOf = (path: string): string => join(path.split('/session.v')[0]!)
@@ -349,40 +356,37 @@ describe('stored Session repair', () => {
     }
   })
 
-  it('renames the reply a timed program question waits for', async () => {
+  it('refuses a direct question reply in both modes and leaves the bytes alone', async () => {
     const sessions = await tempRoot()
-    // Only the repeated invocation asks, so the reply can only be its answer.
     const path = await realLog(sessions, answeredQuestion(collidingEvents(), false))
 
-    const outcome = await repairSessionLog(path, { apply: true, backupRoot: join(sessions, 'backups') })
-
-    expect(outcome.status).toBe('repaired')
-    expect(questionReply(await decodeAll(path))?.['callId']).toBe('call-x:ptc:2#1')
+    await expectRefused(path, join(sessions, 'backups'), /outside this command's repair scope/)
   })
 
   it('refuses a queued question reply in both modes and leaves the bytes alone', async () => {
     const sessions = await tempRoot()
-    const path = await realLog(sessions, withQueuedReply(answeredQuestion(collidingEvents(), false)))
-    const before = await readFile(path)
+    // Only the queued copy exists, as the application writes it.
+    const queued = answeredQuestion(collidingEvents(), false).filter(event => !isQuestionReply(event))
+    const path = await realLog(sessions, withQueuedReply(queued))
 
-    const planned = await repairSessionLog(path, { apply: false, backupRoot: join(sessions, 'backups') })
-    expect([planned.status, planned.reason]).toEqual(['failed', expect.stringContaining('does not rewrite')])
-    expect(await readFile(path)).toEqual(before)
-
-    const applied = await repairSessionLog(path, { apply: true, backupRoot: join(sessions, 'backups') })
-    expect(applied.status).toBe('failed')
-    expect(await readFile(path)).toEqual(before)
+    await expectRefused(path, join(sessions, 'backups'), /does not rewrite/)
     expect(await readdir(sessions)).toHaveLength(1)
   })
 
-  it('refuses a reply two questions could own', async () => {
+  it('refuses a reply three invocations could own', async () => {
     const sessions = await tempRoot()
-    // Both invocations asked the same id, so the answer is ambiguous.
-    const path = await realLog(sessions, answeredQuestion(collidingEvents(), true))
+    // Three invocations mint the same id; the reply cannot name one of them.
+    const base = answeredQuestion(collidingEvents(), false)
+    const third = base.slice(5, 12).map((event, index) => ({
+      ...event, seq: SessionSeq(base.length + index), time: base.length + index + 1,
+    }))
+    const path = await realLog(sessions, [...base, ...third])
 
-    const outcome = await repairSessionLog(path, { apply: true, backupRoot: join(sessions, 'backups') })
+    const planned = await repairSessionLog(path, { apply: false, backupRoot: join(sessions, 'backups') })
+    const applied = await repairSessionLog(path, { apply: true, backupRoot: join(sessions, 'backups') })
 
-    expect([outcome.status, outcome.reason]).toEqual(['failed', expect.stringContaining('could settle either question')])
+    expect(planned.status).toBe('failed')
+    expect(applied.status).toBe('failed')
   })
 
   it('refuses a job settlement no registration proves', async () => {

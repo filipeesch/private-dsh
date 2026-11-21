@@ -144,8 +144,6 @@ const QUESTION_REPLY_TYPE = 'user/message'
 function slotsFor(type: string): readonly IdSlot[] {
   if (DISPATCH_TYPES.has(type)) return [{ where: 'data', key: 'subCallId' }, { where: 'data', key: 'parentCallId' }]
   if (LATE_REFERENCE_TYPES.has(type)) return [{ where: 'toolCall', key: 'callId' }]
-  // A user-question reply settles the dispatch its `source.callId` names.
-  if (type === QUESTION_REPLY_TYPE) return [{ where: 'source', key: 'callId' }]
   return []
 }
 
@@ -340,24 +338,15 @@ function rowRenames(lines: readonly StoredLine[], plans: readonly PlannedRename[
       assign(index, plan.from, plan.to)
     }
   }
-  // A timed program question settles by the sub-call id its reply names. The
-  // reply may arrive long after the invocation, so ownership is proved by the
-  // absence of an earlier pending question on the same id.
+  // A timed program question settles by the exact sub-call id its reply names.
+  // More than one invocation can mint that id, so the reply cannot be attributed
+  // here; the command refuses instead of settling the wrong question.
   for (const [index, entry] of lines.entries()) {
     const row = entry.row
     if (row?.type !== QUESTION_REPLY_TYPE) continue
     const reference = objectAt(row.data['source'])?.['callId']
-    if (typeof reference !== 'string') continue
-    const plan = plans.find(candidate => candidate.from === reference)
-    if (plan === undefined) continue
-    const earlierQuestion = lines.some((candidate, position) => position < plan.window.start
-      && candidate.row?.type === 'tool/ptc-dispatch-start'
-      && candidate.row.data['subCallId'] === reference
-      && candidate.row.data['name'] === 'ask_user_question')
-    if (earlierQuestion) {
-      throw new Error(`reply at row ${index + 1} could settle either question named ${reference}`)
-    }
-    assign(index, plan.from, plan.to)
+    if (typeof reference !== 'string' || !plans.some(plan => plan.from === reference)) continue
+    throw new Error(`reply at row ${index + 1} names the renumbered sub-call ${reference}; question replies are outside this command's repair scope`)
   }
   const claimed = new Set(plans.map(plan => plan.from))
   // Any other record that names a renumbered sub-call — a queued copy of a
