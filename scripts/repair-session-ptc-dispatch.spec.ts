@@ -64,10 +64,14 @@ function collidingEvents(): SessionEvent[] {
     }, true)
     append('tool/call', { turn: 1, step, callId, name: 'run_code', arguments: '{"code":"x"}' })
     dispatch('call-x:ptc:1')
+    dispatch('call-x:ptc:2')
     if (step === 2) {
       // A nested program dispatched by the repeated invocation.
       dispatch('call-x:ptc:1:ptc:1', 'call-x:ptc:1', 'nested')
       append('job/registered', { jobId: 'job-2', toolCall: { callId: 'call-x:ptc:1', rootCallId: callId } })
+    } else {
+      // A job registered by the invocation the repair leaves unchanged.
+      append('job/registered', { jobId: 'job-first', toolCall: { callId: 'call-x:ptc:1', rootCallId: callId } })
     }
     append('tool/result', {
       turn: 1, step,
@@ -75,12 +79,9 @@ function collidingEvents(): SessionEvent[] {
     }, true)
     append('step/end', { turn: 1, step })
   }
-  // A late job record outside the final invocation window still names the
-  // renamed sub-call, so the repair must follow it by its tool reference.
-  append('job/registered', { jobId: 'job-late', toolCall: { callId: 'call-x:ptc:1', rootCallId: callId } })
-  append('job/settled', { jobId: 'job-late', status: 'completed', toolCall: { callId: 'call-x:ptc:1', rootCallId: callId } })
-  // A job created by the repeated invocation settles after it; its id must
-  // follow the invocation that registered it, not the position it settles in.
+  // Both jobs settle after their invocations; each must follow the invocation
+  // that registered its jobId, not the position it settles in.
+  append('job/settled', { jobId: 'job-first', status: 'completed', toolCall: { callId: 'call-x:ptc:1', rootCallId: callId } })
   append('job/settled', { jobId: 'job-2', status: 'completed', toolCall: { callId: 'call-x:ptc:1', rootCallId: callId } })
   append('turn/end', { turn: 1, reason: { kind: 'completed' } })
   return events
@@ -169,7 +170,10 @@ describe('repair planning', () => {
 
   it('renumbers only the later invocation and attributes nested children', () => {
     const plans = planRepairs(lines(rowsOf(collidingEvents())))
-    expect(plans.map(plan => [plan.from, plan.to])).toEqual([['call-x:ptc:1', 'call-x:ptc:1#1']])
+    expect(plans.map(plan => [plan.from, plan.to])).toEqual([
+      ['call-x:ptc:1', 'call-x:ptc:1#1'],
+      ['call-x:ptc:2', 'call-x:ptc:2#1'],
+    ])
   })
 
   it('plans nothing when the ids are unique or only the call id repeats', () => {
@@ -177,13 +181,12 @@ describe('repair planning', () => {
     const secondInvocation = unique.findIndex((row, index) => row['type'] === 'tool/call'
       && unique.findIndex(candidate => candidate['type'] === 'tool/call') < index)
     for (const [index, row] of unique.entries()) {
-      if (index >= secondInvocation) {
-        const data = row['data']
-        if (typeof data !== 'object' || data === null) continue
-        const record = data as Record<string, unknown>
-        if (typeof record['subCallId'] === 'string') record['subCallId'] = record['subCallId'].replaceAll('ptc:1', 'ptc:2')
-        if (typeof record['parentCallId'] === 'string') record['parentCallId'] = record['parentCallId'].replaceAll('ptc:1', 'ptc:2')
-      }
+      if (index < secondInvocation) continue
+      const data = row['data']
+      if (typeof data !== 'object' || data === null) continue
+      const record = data as Record<string, unknown>
+      if (typeof record['subCallId'] === 'string') record['subCallId'] = `${record['subCallId']}-second`
+      if (typeof record['parentCallId'] === 'string') record['parentCallId'] = `${record['parentCallId']}-second`
     }
     expect(planRepairs(lines(unique))).toEqual([])
   })
@@ -205,27 +208,32 @@ describe('stored Session repair', () => {
     const outcome = await repairSessionLog(path, { apply: true, backupRoot: join(sessions, 'backups') })
 
     expect(outcome.status).toBe('repaired')
-    expect(outcome.renames).toEqual([{ from: 'call-x:ptc:1', to: 'call-x:ptc:1#1' }])
+    expect(outcome.renames).toEqual([
+      { from: 'call-x:ptc:1', to: 'call-x:ptc:1#1' },
+      { from: 'call-x:ptc:2', to: 'call-x:ptc:2#1' },
+    ])
     const after = await decodeAll(path)
     expect(after[0]?.['type']).toBe('session')
     expect(after).toHaveLength(originalRows.length)
     const starts = after
       .filter(row => row['type'] === 'tool/ptc-dispatch-start')
       .map(row => (row['data'] as Record<string, unknown>)['subCallId'])
-    expect(starts).toEqual(['call-x:ptc:1', 'call-x:ptc:1#1', 'call-x:ptc:1:ptc:1'])
+    expect(starts).toEqual([
+      'call-x:ptc:1', 'call-x:ptc:2',
+      'call-x:ptc:1#1', 'call-x:ptc:2#1', 'call-x:ptc:1:ptc:1',
+    ])
     const nestedParents = after
       .filter(row => (row['data'] as Record<string, unknown>)?.['name'] === 'nested')
       .map(row => (row['data'] as Record<string, unknown>)['parentCallId'])
     expect(nestedParents).toEqual(['call-x:ptc:1#1', 'call-x:ptc:1#1'])
-    // Every job record that names the renamed sub-call joins it, however late
-    // it settles and whichever invocation registered it.
+    // The untouched invocation's job keeps its id; the repeated one follows it.
     const jobs = after
       .filter(row => String(row['type']).startsWith('job/'))
       .map(row => (row['data'] as Record<string, unknown>)['toolCall'])
     expect(jobs).toEqual([
+      { callId: 'call-x:ptc:1', rootCallId: callId },
       { callId: 'call-x:ptc:1#1', rootCallId: callId },
-      { callId: 'call-x:ptc:1#1', rootCallId: callId },
-      { callId: 'call-x:ptc:1#1', rootCallId: callId },
+      { callId: 'call-x:ptc:1', rootCallId: callId },
       { callId: 'call-x:ptc:1#1', rootCallId: callId },
     ])
     // Every row keeps all of its non-id content.
@@ -245,7 +253,10 @@ describe('stored Session repair', () => {
     const outcome = await repairSessionLog(path, { apply: false, backupRoot: join(sessions, 'backups') })
 
     expect(outcome.status).toBe('planned')
-    expect(outcome.renames).toEqual([{ from: 'call-x:ptc:1', to: 'call-x:ptc:1#1' }])
+    expect(outcome.renames).toEqual([
+      { from: 'call-x:ptc:1', to: 'call-x:ptc:1#1' },
+      { from: 'call-x:ptc:2', to: 'call-x:ptc:2#1' },
+    ])
     expect(await readFile(path)).toEqual(before)
     expect(await readdir(sessions)).toHaveLength(1)
   })
@@ -282,7 +293,7 @@ describe('stored Session repair', () => {
     const read = await ctx.sessionPersistence.open(id, 'read')
     try {
       const result = await read.read()
-      expect(result.events.filter(event => event.type === 'tool/ptc-dispatch-start')).toHaveLength(3)
+      expect(result.events.filter(event => event.type === 'tool/ptc-dispatch-start')).toHaveLength(5)
     } finally {
       await read.close()
     }
@@ -291,7 +302,7 @@ describe('stored Session repair', () => {
   it('refuses a job settlement no registration proves', async () => {
     const sessions = await tempRoot()
     const events = collidingEvents()
-      .filter(event => !(event.type === 'job/registered' && dataOf(event)['jobId'] === 'job-late'))
+      .filter(event => !(event.type === 'job/registered' && dataOf(event)['jobId'] === 'job-first'))
       .map((event, index) => ({ ...event, seq: SessionSeq(index), time: index + 1 }))
     const path = await realLog(sessions, events)
 

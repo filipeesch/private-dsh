@@ -270,28 +270,36 @@ export function planRepairs(lines: readonly StoredLine[]): PlannedRename[] {
 /** Event types whose id fields may reference a sub-call after its invocation. */
 const LATE_REFERENCE_TYPES = new Set(['job/registered', 'job/settled'])
 
-/** Which invocation one job belongs to, decided by its registration row. */
+/**
+ * Which invocation one job belongs to, decided by its registration row. A job
+ * registered by an invocation that the repair does not renumber stays unchanged;
+ * one registered outside every invocation is refused when it names a sub-call
+ * the repair renumbers, because its invocation cannot be proven.
+ */
 function jobOwners(
   lines: readonly StoredLine[],
   plans: readonly PlannedRename[],
-): Map<string, PlannedRename> {
-  const owners = new Map<string, PlannedRename>()
+  windows: readonly CallWindow[],
+): Map<string, { readonly plan?: PlannedRename }> {
+  const owners = new Map<string, { readonly plan?: PlannedRename }>()
   for (const [index, entry] of lines.entries()) {
     const row = entry.row
     if (row?.type !== 'job/registered') continue
     const jobId = row.data['jobId']
     if (typeof jobId !== 'string') continue
     const reference = objectAt(row.data['toolCall'])?.['callId']
-    const enclosing = plans.find(plan => index >= plan.window.start && index <= plan.window.end)
-    const claiming = typeof reference === 'string' ? plans.filter(plan => plan.from === reference) : []
-    const owner = enclosing ?? (claiming.length === 1 ? claiming[0] : undefined)
-    if (owner === undefined) {
-      if (claiming.length > 1) {
-        throw new Error(`job ${jobId} at row ${index + 1} could belong to any of ${claiming.length} invocations`)
+    const enclosing = windows.find(window => index >= window.start && index <= window.end)
+    if (enclosing === undefined) {
+      const claiming = typeof reference === 'string' ? plans.filter(plan => plan.from === reference) : []
+      if (claiming.length > 0) {
+        throw new Error(`job ${jobId} at row ${index + 1} is registered outside the invocations it names`)
       }
       continue
     }
-    owners.set(jobId, owner)
+    const plan = typeof reference === 'string'
+      ? plans.find(candidate => candidate.from === reference && candidate.window.start === enclosing.start)
+      : undefined
+    owners.set(jobId, plan === undefined ? {} : { plan })
   }
   return owners
 }
@@ -299,6 +307,7 @@ function jobOwners(
 /** Build the per-row rename maps: an invocation's own dispatches, then its jobs. */
 function rowRenames(lines: readonly StoredLine[], plans: readonly PlannedRename[]): Map<number, Map<string, string>> {
   const perRow = new Map<number, Map<string, string>>()
+  const windows = callWindows(lines)
   const assign = (index: number, from: string, to: string): void => {
     const existing = perRow.get(index) ?? new Map<string, string>()
     const previous = existing.get(from)
@@ -311,13 +320,17 @@ function rowRenames(lines: readonly StoredLine[], plans: readonly PlannedRename[
   for (const [index, entry] of lines.entries()) {
     const row = entry.row
     if (row === undefined || !DISPATCH_TYPES.has(row.type)) continue
-    const plan = plans.find(candidate => index >= candidate.window.start && index <= candidate.window.end)
-    if (plan === undefined) continue
-    if (row.data['rootCallId'] !== plan.callId) continue
-    if (!slotValues(row).includes(plan.from)) continue
-    assign(index, plan.from, plan.to)
+    const window = windows.find(candidate => index >= candidate.start && index <= candidate.end)
+    if (window === undefined || row.data['rootCallId'] !== window.callId) continue
+    const values = slotValues(row)
+    // Every rename this invocation applied to this row, so a nested child and
+    // its parent each follow their own mapping.
+    for (const plan of plans) {
+      if (plan.window.start !== window.start || !values.includes(plan.from)) continue
+      assign(index, plan.from, plan.to)
+    }
   }
-  const owners = jobOwners(lines, plans)
+  const owners = jobOwners(lines, plans, windows)
   const claimed = new Set(plans.map(plan => plan.from))
   for (const [index, entry] of lines.entries()) {
     const row = entry.row
@@ -331,7 +344,8 @@ function rowRenames(lines: readonly StoredLine[], plans: readonly PlannedRename[
       // invocation created it; rewriting by position would corrupt the pairing.
       throw new Error(`job ${jobId} at row ${index + 1} has no registration that proves its invocation`)
     }
-    assign(index, owner.from, owner.to)
+    if (owner.plan === undefined) continue
+    assign(index, owner.plan.from, owner.plan.to)
   }
   return perRow
 }
