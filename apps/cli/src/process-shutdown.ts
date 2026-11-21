@@ -115,8 +115,10 @@ export function createProcessShutdown(
   const safeReport = (message: string): void => {
     try {
       report(message)
-    } catch {
-      // A failing reporter cannot be allowed to strand the exit.
+    } catch (reportFailure: unknown) {
+      // A reporter that throws (`reportFailure`) cannot be allowed to strand the
+      // exit; with no reporter left the failure is deliberately discarded.
+      void reportFailure
     }
   }
 

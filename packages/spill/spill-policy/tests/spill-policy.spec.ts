@@ -311,7 +311,7 @@ describe('the durable dispatch-log arm', () => {
     // The artifact holds the full text under the dispatch label and sub-call id.
     const save = spill.saves.find(entry => entry.source.label === 'dispatch')
     expect(save).toMatchObject({
-      source: { kind: 'tool', toolName: 'huge_read', callId: 'parent-1:ptc:1', label: 'dispatch' },
+      source: { kind: 'tool', toolName: 'huge_read', callId: 'parent-1:ptc-2026-11:1', label: 'dispatch' },
     })
     expect(save?.content).toBe('H'.repeat(2_000))
   })
@@ -423,11 +423,11 @@ describe('the durable dispatch-log arm', () => {
     const events: { type: string; data: unknown }[] = []
     const agent = observedAgent(ctx, 'dispatch-spill-bound', (type: string, data: unknown) => {
       events.push({ type, data })
-      if (type === 'tool/ptc-dispatch-start' && (data as { subCallId: string }).subCallId.endsWith(':ptc:3')) thirdStarted.resolve(undefined)
+      if (type === 'tool/ptc-dispatch-start' && /:ptc-2026-11:(?:\d+:\d+:)?3$/.test((data as { subCallId: string }).subCallId)) thirdStarted.resolve(undefined)
     })
     ctx.tools.register(textTool('huge_read', 'H'.repeat(2_000)))
     const started = (n: number): boolean => events.some(event => event.type === 'tool/ptc-dispatch-start'
-      && (event.data as { subCallId: string }).subCallId.endsWith(`:ptc:${n}`))
+      && new RegExp(`:ptc-2026-11:(?:\\d+:\\d+:)?${n}$`).test((event.data as { subCallId: string }).subCallId))
     const runPromise = executeModelToolFixture(ctx, {
       signal: testToolSignal,
       callId: brandString<ToolCallId>('parent-bound'),
