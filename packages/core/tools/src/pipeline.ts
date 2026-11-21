@@ -136,6 +136,7 @@ export class ToolExecutionPipeline {
       signal,
       ...agent !== undefined ? { agent } : {},
       ...exec.toolSet !== undefined ? { toolSet: exec.toolSet } : {},
+      ...exec.position !== undefined ? { position: exec.position } : {},
       ...parent !== undefined ? { parent } : {},
       ...exec.schema !== undefined ? { schema: exec.schema } : {},
       deferContext(context: UserMessage): void {

@@ -33,7 +33,7 @@ import type { PtcCalls } from './ptc-calls.ts'
 import { CodeRunFailedError, ToolCallLimitExceededError } from './errors.ts'
 import type { Config } from './config.ts'
 import type { RunCodeToolOptions } from './run-code.ts'
-import type { ToolDefinition, ToolExecution, ToolExecutionFailure, ToolExecutionResult, ToolRunContext } from '@deepseek-ai/dsh-tools'
+import type { ToolCallPosition, ToolDefinition, ToolExecution, ToolExecutionFailure, ToolExecutionResult, ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type {} from './types.ts'
 
 /** The model-facing name of the PTC mode tool. */
@@ -59,6 +59,32 @@ function runCodeFlavor(language: string, outputInstruction: string, execution = 
       + outputInstruction,
     codeDescription: execution.codeDescription,
   }
+}
+
+/**
+ * Derive one PTC sub-call id from the enclosing call, the owning model step, and
+ * the dispatch attempt.
+ *
+ * The step coordinates make the id unique per Session log even when a provider
+ * reuses one tool-call id across steps: the reader admits a repeated advertised
+ * call id only in a different step, so `(turn, step)` distinguishes the two
+ * invocations. Calls outside a model step keep the legacy `<callId>:ptc:<n>`
+ * shape; they record no root call events, so no reachable log contains them
+ * twice.
+ * @param callId - the enclosing call whose program dispatches this sub-call.
+ * @param position - the committed model step owning the enclosing call, when one exists.
+ * @param attempt - one-based dispatch attempt ordinal within the program.
+ * @returns the opaque sub-call id.
+ */
+export function ptcSubCallId(
+  callId: ToolCallId,
+  position: ToolCallPosition | undefined,
+  attempt: number,
+): ToolCallId {
+  const prefix = `${String(callId)}:ptc:`
+  return brandString<ToolCallId>(position === undefined
+    ? `${prefix}${attempt}`
+    : `${prefix}${position.turn}:${position.step}:${attempt}`)
 }
 
 const TYPESCRIPT_OUTPUT_INSTRUCTION = 'Show selected text and images with inspect(...values).'
@@ -467,7 +493,7 @@ export function createRunCodeTransport(
             throw error
           }
           const normalized = jsonNormalizeArgs(rawArgs)
-          const subCallId = brandString<ToolCallId>(`${String(exec.callId)}:ptc:${n}`)
+          const subCallId = ptcSubCallId(exec.callId, exec.position, n)
           const input = {
             callId: subCallId,
             rootCallId: exec.rootCallId,
@@ -476,6 +502,7 @@ export function createRunCodeTransport(
             arguments: normalized.dispatched,
             ...exec.agent ? { agent: exec.agent } : {},
             ...exec.toolSet !== undefined ? { toolSet: exec.toolSet } : {},
+            ...exec.position === undefined ? {} : { position: exec.position },
             parent: exec.token,
             signal: runController.signal,
           }

@@ -283,11 +283,12 @@ export class StageSupervisor {
 }
 
 /**
- * Grace period per escalation step. `dsh web` gives its plugin tree five seconds
- * to dispose after the first signal; escalating earlier would turn the graceful
- * drain into a forced exit.
+ * Grace period per escalation step. `dsh web` bounds its own shutdown at ten
+ * seconds ([PROCESS_SHUTDOWN_TIMEOUT_MS](../apps/cli/src/process-shutdown.ts)),
+ * so the supervisor must wait longer than that: escalating earlier would turn
+ * the graceful drain into a forced exit.
  */
-const STOP_GRACE_MS = 6_000
+const STOP_GRACE_MS = 12_000
 
 /**
  * Spawn one long-lived stage with inherited stdio and hand it to the supervisor.

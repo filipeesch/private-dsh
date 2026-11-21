@@ -1135,7 +1135,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'tool/ptc-dispatch': PtcDispatchEventData
 ```
 
-来源：[`packages/core/tool-executor-ptc/src/types.ts:61`](../packages/core/tool-executor-ptc/src/types.ts)
+来源：[`packages/core/tool-executor-ptc/src/types.ts:63`](../packages/core/tool-executor-ptc/src/types.ts)
 
 <a id="toolptc-dispatch-start--log-only"></a>
 
@@ -1145,7 +1145,9 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 /**
  * One sub-dispatch STARTING inside a `run_code` program: the parent
  * `run_code` call id, the opaque sub-call id (new calls use
- * `<parent>:ptc:<n>`, numbered in submission order), and the tool `name` with its
+ * `<parent>:ptc:<turn>:<step>:<n>` — enclosing call, owning model step, and
+ * submission-order attempt — so a provider that reuses one tool-call id across
+ * steps cannot repeat an id within the log), and the tool `name` with its
  * JSON-normalized `arguments` — the exact value dispatched, normalized
  * BEFORE dispatch, so this append can never fail on payload shape.
  * Appended when the scheduler actually starts the call (not at
@@ -1158,7 +1160,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'tool/ptc-dispatch-start': PtcDispatchStartEventData
 ```
 
-来源：[`packages/core/tool-executor-ptc/src/types.ts:45`](../packages/core/tool-executor-ptc/src/types.ts)
+来源：[`packages/core/tool-executor-ptc/src/types.ts:47`](../packages/core/tool-executor-ptc/src/types.ts)
 
 <a id="toolresult--surface"></a>
 
@@ -5284,7 +5286,7 @@ SHA-256: `43e311235aa537df1bacdd92d144df8a952337a76e9ac892cdf670f1a797bad8`
 
 SHA-256: `3cfc3a56502da1f8c6153c2c56657bab4b749056968634dd0991d325ec1c919f`
 
-来源：[`packages/core/tools/src/contracts.ts:395`](../packages/core/tools/src/contracts.ts)
+来源：[`packages/core/tools/src/contracts.ts:411`](../packages/core/tools/src/contracts.ts)
 
 | 属性 | 存在性 | 类型 |
 |---|---|---|
@@ -7228,7 +7230,7 @@ SHA-256: `b81e9de81a481b24e1e1f9adf038bfc59e57b4f35ce62f8f1e45284186f4f812`
 
 SHA-256: `dba54c09c6e7aafc9acbed7792ecc920d99f92d0784aeeed10af55f7fe0bc8cd`
 
-来源：[`packages/core/tool-executor-ptc/src/types.ts:68`](../packages/core/tool-executor-ptc/src/types.ts)
+来源：[`packages/core/tool-executor-ptc/src/types.ts:70`](../packages/core/tool-executor-ptc/src/types.ts)
 
 | 属性 | 存在性 | 类型 |
 |---|---|---|

@@ -37,6 +37,7 @@ import { installProxyFromEnvironment } from '@deepseek-ai/dsh-http-proxy'
 import { DSH_LAUNCH_ENVIRONMENT_KEY, type LaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
 import { provideCmdline, type AppReady } from '@deepseek-ai/dsh-cmdline'
 import { createProcessShutdown, type ProcessShutdown } from './process-shutdown.ts'
+import { createProfileShutdownPhases } from './shutdown-phases.ts'
 
 const NAME = 'dsh'
 
@@ -305,7 +306,7 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
       options.profile, options.patchFiles, options.fromDefaultProfile, options.resolvedProfile,
     )
     const appReady = createAppReady()
-    const shutdown = createProcessShutdown(dispose)
+    const shutdown = createProcessShutdown(createProfileShutdownPhases(() => app.current, dispose))
     const signalShutdown = new AbortController()
     const interrupt = (code: number): void => {
       signalShutdown.abort()
@@ -318,8 +319,10 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
     // complete; SIGINT is a user interrupt and reports 130.
     process.on('SIGTERM', () => { interrupt(0) })
     process.on('SIGINT', () => { interrupt(130) })
+    // A fatal failure joins the ordered shutdown instead of disposing the tree
+    // alone, so the durability barrier still runs before the process exits.
     installFailLoud(NAME, process, async () => {
-      await app.current?.fiber.dispose()
+      await shutdown.shutdown(1)
     })
 
     const rootConfig = join(composed.profile.dir, PROFILE_ROOT_FILENAME)

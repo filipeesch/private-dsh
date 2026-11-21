@@ -257,10 +257,7 @@ interface ToolBatchInput {
    * as session initialization hooks. Without `log`, root call/result events are
    * omitted while `agent`, when provided, still supplies scope and execution context.
    */
-  readonly log?: {
-    readonly turn: number
-    readonly step: number
-  }
+  readonly log?: ToolCallPosition
 }
 ```
 
@@ -316,6 +313,17 @@ Built-in executors pass parsed `ToolExecutionInput` values to the shared `ToolEx
 /** Opaque call identity that permits correlation without exposing mutable execution state. */
 type ToolExecutionToken = symbol & { readonly [toolExecutionTokenBrand]: true }
 ```
+```ts type-equiv
+/**
+ * Committed model step that owns one tool call. The agent loop supplies it;
+ * nothing else may invent or rewrite it, because nested call identities derive
+ * from it.
+ */
+interface ToolCallPosition {
+  readonly turn: number
+  readonly step: number
+}
+```
 
 ```ts type-equiv
 /**
@@ -349,6 +357,12 @@ interface ToolExecutionInput {
    * `UNKNOWN_TOOL` before the policy pipeline.
    */
   readonly parent?: ToolExecutionToken
+  /**
+   * Committed model step owning this call; nested dispatchers propagate the
+   * enclosing value. Absent outside a model step, where the call records no
+   * root call or result events.
+   */
+  readonly position?: ToolCallPosition
   /** Required caller-owned cancellation for this invocation. */
   readonly signal: AbortSignal
 }
@@ -414,7 +428,7 @@ interface PtcDispatchLog {
   readonly exec: ToolExecution
   /** The calling agent (the scope routing key and the spill owner), when the outer call has one. */
   readonly agent?: Agent
-  /** Opaque sub-call id; new calls use `<parent>:ptc:<n>`. */
+  /** Opaque sub-call id; new calls use `<parent>:ptc:<turn>:<step>:<n>`, or `<parent>:ptc:<n>` outside a model step. */
   readonly subCallId: ToolCallId
   /** The dispatched sub-tool name. */
   readonly name: string
