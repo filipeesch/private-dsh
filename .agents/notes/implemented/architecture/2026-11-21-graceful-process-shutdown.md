@@ -14,11 +14,11 @@ Signals request one shutdown; they never escalate it. The first request fixes th
 
 The shutdown runs ordered phases, and the phases belong to the launcher because it owns the signal handlers and the root context:
 
-1. quiesce: cancel running turns and wait for their settlement, so cancellation outcomes are recorded before anything is flushed;
+1. quiesce: cancel running turns and wait for their settlement, so cancellation outcomes are recorded before anything is flushed. Each input surface stays live until teardown disposes it, so work accepted during the barrier can still start a turn; the sequence does not freeze admission;
 2. barrier: flush every open Session write handle, the durability call the persistence service already exposes;
 3. teardown: dispose the tree, which closes handles, releases claims, and terminates owned children.
 
-The barrier gets its own budget carved out of the deadline rather than racing it: when quiesce consumes the whole deadline, the barrier still runs before the forced exit. The deadline is a fixed ten seconds, and the development supervisor's escalation grace is raised above it so the supervisor cannot convert the interrupt into a second signal while the application is still inside its own deadline. When the deadline expires, the launcher writes one report to standard error naming the unfinished phases, and says separately when the barrier itself did not finish in its reserve. The fatal-error handler joins the same sequence instead of disposing the tree alone.
+The hard bound is ten seconds from the first request. The ordered phases run until one second before it, and that second is reserved for the durability barrier while the following second is reserved for terminating owned children, with a small scheduling slack; a stalled phase therefore hands over instead of costing the two things that must still happen. If the barrier itself exhausts its reserve, the log may be incomplete and the report says which phase ran out. The development supervisor waits twelve seconds, above the hard bound, so it cannot convert the interrupt into a second signal while the application is still inside its own deadline. When the reserved path finishes, the launcher writes one report to standard error naming the unfinished phases. The fatal-error handler joins the same sequence instead of disposing the tree alone, and its release bound covers that sequence.
 
 ## Alternatives considered
 
@@ -34,4 +34,4 @@ The barrier gets its own budget carved out of the deadline rather than racing it
 
 ## Consequences
 
-An interrupt always runs the same sequence, so a Session log is readable after the process exits even when the deadline expires. A slow phase is diagnosable from one stderr line instead of a silent truncation. The deadline is fixed, so a machine that needs longer leans on the report rather than a configuration knob. `dev-web` stops six seconds after the first signal only if the application exits first; its grace is now above the application's deadline, and the two values must move together.
+An interrupt always runs the same sequence, so a Session log is readable after the process exits as long as the barrier finishes inside its reserve; when the barrier itself runs out, the report says so instead of implying a complete teardown. A slow phase is diagnosable from one stderr line instead of a silent truncation. The deadline is fixed, so a machine that needs longer leans on the report rather than a configuration knob. `dev-web` waits twelve seconds after the first signal, above the application's hard bound, so the supervisor never turns the interrupt into a second signal while the application is still inside its own deadline; the two values must move together.

@@ -20,6 +20,11 @@ Every started PTC sub-call MUST record a sub-call id that is unique within that 
 - **WHEN** a single program dispatches three nested tools in submission order
 - **THEN** the log records three distinct sub-call ids, each appearing once as a start and once as a settlement
 
+#### Scenario: The provider advertises a call id shaped like a minted sub-call id
+
+- **WHEN** one step advertises distinct program call ids `x` and `x:ptc:1:1:1`, and the first program dispatches a nested program as its first child
+- **THEN** the nested child and the second program's first child carry different ids, and reading the complete log succeeds
+
 #### Scenario: A program dispatches a program that dispatches tools
 
 - **WHEN** a nested program call runs inside another program

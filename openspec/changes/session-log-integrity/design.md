@@ -31,9 +31,9 @@ Measured behavior that motivates the shutdown decisions: `make web` runs `pnpm r
 
 ## Decisions
 
-### Sub-call ids carry the owning model step
+### Sub-call ids carry the owning model step, and nested ids use a disjoint shape
 
-New sub-call ids become `<callId>:ptc:<turn>:<step>:<n>`.
+New root sub-call ids become `<callId>:ptc:<turn>:<step>:<n>`; nested dispatches use `<parentSubCallId>+<n>`, because a provider may advertise a root id that is textually equal to a minted sub-call id (`x` and `x:ptc:1:1:1` in one step). With one formula, the nested child of `x` and the first child of the root `x:ptc:1:1:1` would both be `x:ptc:1:1:1:ptc:1:1:1`. Two disjoint shapes remove that alias: a root id always ends with `:ptc:<turn>:<step>:<n>`, a nested id always ends with `+<n>`, and two nested ids can only coincide when their parents and ordinals do.
 
 The invariant that makes this unique: the reader requires every advertised tool-call id to be distinct within its assistant message, and one message belongs to exactly one step. So one tool-call id can only recur in a different step, and `(turn, step)` distinguishes the two invocations. `n` still counts dispatch attempts inside one program, including attempts rejected before dispatch.
 

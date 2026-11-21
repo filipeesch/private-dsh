@@ -41,7 +41,7 @@ Before the process exits, whether the shutdown finished normally or its deadline
 
 ### Requirement: Shutdown runs in a fixed order
 
-A shutdown MUST stop new work, settle work already in flight, flush durable state, release claims, terminate owned children, and only then exit.
+A shutdown MUST cancel work in flight, await its settlement, flush durable state, release storage claims, terminate owned children, dispose the profile's input surfaces, and only then exit. Work that an input surface accepts before its disposal may still start a turn; the shutdown does not claim a hard admission freeze.
 
 #### Scenario: Interrupt arrives during a model turn
 

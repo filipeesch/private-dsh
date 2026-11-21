@@ -288,7 +288,13 @@ export class StageSupervisor {
  * so the supervisor must wait longer than that: escalating earlier would turn
  * the graceful drain into a forced exit.
  */
-const STOP_GRACE_MS = 12_000
+/**
+ * How long a stage may take to exit after the supervisor forwards a signal.
+ * Must stay above the application's own hard shutdown bound
+ * (`PROCESS_SHUTDOWN_TIMEOUT_MS`, ten seconds) so escalation cannot cut a
+ * shutdown that is still inside its deadline.
+ */
+export const STOP_GRACE_MS = 12_000
 
 /**
  * Spawn one long-lived stage with inherited stdio and hand it to the supervisor.

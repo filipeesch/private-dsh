@@ -533,6 +533,21 @@ describe('installFailLoud', () => {
     await vi.waitFor(() => { expect(proc.exits).toEqual([1]) })
   })
 
+  it('honors a caller-supplied release bound for a longer ordered shutdown', async () => {
+    vi.useFakeTimers()
+    try {
+      const proc = fakeProc()
+      installFailLoud(NAME, proc, () => new Promise<void>(() => {}), 50)
+      proc.rejection(new Error('boom'))
+      await vi.advanceTimersByTimeAsync(49)
+      expect(proc.exits).toEqual([])
+      await vi.advanceTimersByTimeAsync(1)
+      expect(proc.exits).toEqual([1])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('exits without waiting when a release hook never settles', async () => {
     vi.useFakeTimers()
     try {

@@ -9,11 +9,11 @@
   en: 76ad3fac3ff48de4
   zh: 33c4d8d334ce5631
 /agent-note-process-shutdown-is-one-idempotent-durable-first-sequence/decision:
-  en: 5bad7f7d2bb08cbf
-  zh: 1713872444674ac1
+  en: 8f0af1eab669c41f
+  zh: 5a5bd18ce338c0c2
 /agent-note-process-shutdown-is-one-idempotent-durable-first-sequence/alternatives-considered:
   en: 8c71775e3d269564
   zh: f98d84dc4d231583
 /agent-note-process-shutdown-is-one-idempotent-durable-first-sequence/consequences:
-  en: bf0e15d455e98aa8
-  zh: 26720699f342d686
+  en: 119a7b348642478b
+  zh: d775f5d0d8f7b83d

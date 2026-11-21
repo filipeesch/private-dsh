@@ -9,6 +9,7 @@ import {
   discoverLibraryDirs,
   discoverPluginDirs,
   parseDevWebArguments,
+  STOP_GRACE_MS,
   StageSupervisor,
   watchClientPlugins,
 } from './dev-web.ts'
@@ -35,6 +36,14 @@ function fakeStage(name: string, exitOn: readonly NodeJS.Signals[]): {
     exit: (code) => { exit.resolve(code) },
   }
 }
+
+describe('dev-web supervisor grace', () => {
+  it('waits past the application shutdown bound before escalating', () => {
+    // `dsh` bounds its own shutdown at ten seconds; the supervisor must not
+    // escalate while the application is still inside that bound.
+    expect(STOP_GRACE_MS).toBeGreaterThan(10_000)
+  })
+})
 
 describe('StageSupervisor', () => {
   it('reports a stage that exits on its own', async () => {

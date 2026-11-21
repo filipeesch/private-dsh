@@ -4,18 +4,19 @@
  * A provider may reuse one tool-call id across consecutive steps. Releases that
  * numbered sub-calls per program invocation then wrote the same sub-call id
  * twice, and the Session format reader refuses the whole log. This command
- * renumbers only the colliding ids of the later invocation, keeps every other
- * recorded value, and recompresses only the frames that contain a changed row.
+ * renumbers only the colliding ids of the later invocation, rewrites only the
+ * recorded id fields, keeps every other value, and recompresses only the frames
+ * that contain a changed row.
+ *
+ * The dry run only reads. Writing takes the Session's write claim first, so a
+ * live writer cannot append between the read and the replacement, and the
+ * original bytes are copied to a backup before the repaired file is published.
  *
  * Usage: `pnpm run repair:sessions-ptc [--sessions-dir PATH] [--apply] [--backup-dir PATH]`
- *
- * The default is a dry run. A repaired Session is written beside a backup of
- * the original, and the command refuses a Session whose log ends in an
- * incomplete frame or whose write claim another live process holds.
  * @module
  */
 
-import { copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -24,6 +25,9 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { SessionWriteLease } from '../packages/session/session-persistence-jsonl/src/lease.ts'
 import { compressZstdFrame, decompressZstdFrame, scanZstdFrames } from '../packages/session/session-persistence-jsonl/src/zstd.ts'
+
+/** Stored Session log filenames this command inspects. */
+const STORED_LOG_PATTERN = /^session\.v\d+\.jsonl\.zstd$/
 
 /** Resolved command line. */
 export interface RepairArguments {
@@ -35,13 +39,17 @@ export interface RepairArguments {
   readonly backupRoot: string
 }
 
-/** Stored Session log filenames this command inspects. */
-const STORED_LOG_PATTERN = /^session\.v\d+\.jsonl\.zstd$/
-
-/** One stored row of a Session log, with the ids it references. */
-interface Row {
+/** One stored event row, keeping the complete envelope so a rewrite preserves it. */
+interface StoredRow {
+  readonly value: Record<string, unknown>
   readonly type: string
   readonly data: Record<string, unknown>
+}
+
+/** One decoded row line: its text and, for event rows, the parsed value. */
+interface StoredLine {
+  readonly line: string
+  readonly row?: StoredRow
 }
 
 /** Outcome of one Session, reported in the summary. */
@@ -59,21 +67,27 @@ export interface SessionRepairOutcome {
 const usage = `Usage: pnpm run repair:sessions-ptc [options]
 
 Renumber colliding PTC dispatch sub-call ids in stored Session logs so the
-Session format reader accepts them again.
+Session format reader accepts them again. The dry run writes nothing.
 
 Options:
   --sessions-dir PATH  Session root to inspect (default: ~/.dsh/sessions)
   --apply              Write the repaired logs; without it the command is a dry run
-  --backup-dir PATH    Where repaired originals are copied first
+  --backup-dir PATH    Where the original bytes are copied first
                        (default: ~/.dsh/session-repair-backups)
   --help               Show this help
 `
+
+/** Raised so the entry point can print help without treating it as a failure. */
+export class HelpRequested extends Error {
+  constructor() { super('help requested') }
+}
 
 /**
  * Resolve the command line.
  * @param argv - arguments after the script path.
  * @param home - Harness home used by the defaults, replaceable by tests.
  * @returns the resolved arguments.
+ * @throws {HelpRequested} for `--help`.
  * @throws Error when an option is unknown or lacks a value.
  */
 export function parseRepairArguments(argv: readonly string[], home: string = resolveDshHome()): RepairArguments {
@@ -98,166 +112,223 @@ export function parseRepairArguments(argv: readonly string[], home: string = res
   return { sessionsDir, apply, backupRoot }
 }
 
-/** Raised so the entry point can print help without treating it as a failure. */
-export class HelpRequested extends Error {
-  constructor() { super('help requested') }
+/** Recorded id fields one row can carry. */
+type IdSlot = { readonly where: 'data'; readonly key: string } | { readonly where: 'toolCall'; readonly key: 'callId' } | { readonly where: 'message'; readonly key: 'callId' }
+
+const ID_SLOTS: readonly IdSlot[] = [
+  { where: 'data', key: 'subCallId' },
+  { where: 'data', key: 'parentCallId' },
+  { where: 'data', key: 'callId' },
+  { where: 'toolCall', key: 'callId' },
+]
+
+/** Read one recursively owned object, or undefined. */
+function objectAt(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined
 }
 
-/** Whether two rows carry the dispatch ids this repair renumbers. */
-interface IdSlots {
-  readonly subCallId?: string
-  readonly parentCallId?: string
-}
-
-function idSlots(row: Row): IdSlots {
-  const data = row.data
-  return {
-    ...typeof data['subCallId'] === 'string' ? { subCallId: data['subCallId'] } : {},
-    ...typeof data['parentCallId'] === 'string' ? { parentCallId: data['parentCallId'] } : {},
+/** Every id one row records in a known slot. */
+function slotValues(row: StoredRow): string[] {
+  const values: string[] = []
+  for (const slot of ID_SLOTS) {
+    const owner = slot.where === 'data' ? row.data : objectAt(row.data[slot.where])
+    const value = owner?.[slot.key]
+    if (typeof value === 'string') values.push(value)
   }
+  return values
 }
 
-/** Every recorded id reference one row may carry, so renames follow dependent records. */
-function referencedIds(row: Row): string[] {
-  const slots = idSlots(row)
-  const toolCall = row.data['toolCall']
-  const ids = [slots.subCallId, slots.parentCallId]
-  if (typeof toolCall === 'object' && toolCall !== null) {
-    const callId = (toolCall as Record<string, unknown>)['callId']
-    if (typeof callId === 'string') ids.push(callId)
+/** Rewrite known id slots; every envelope field and every other value stay untouched. */
+function rewriteSlots(row: StoredRow, renames: ReadonlyMap<string, string>): Record<string, unknown> {
+  const mapped = (value: unknown): unknown => {
+    const next = typeof value === 'string' ? renames.get(value) : undefined
+    return next ?? value
   }
-  const direct = row.data['callId']
-  if (typeof direct === 'string') ids.push(direct)
-  return ids.filter((id): id is string => id !== undefined)
+  const data: Record<string, unknown> = { ...row.data }
+  for (const slot of ID_SLOTS) {
+    if (slot.where === 'data') {
+      data[slot.key] = mapped(data[slot.key])
+      continue
+    }
+    const nested = objectAt(data[slot.where])
+    if (nested !== undefined) data[slot.where] = { ...nested, [slot.key]: mapped(nested[slot.key]) }
+  }
+  return { ...row.value, data }
 }
 
-/** One program invocation's rows: its `tool/call` through the matching result. */
+/** Parse one stored line; header rows keep their text and stay unparsed. */
+function parseLine(line: string): StoredLine {
+  const value: unknown = JSON.parse(line)
+  const record = objectAt(value)
+  const type = record?.['type']
+  if (record === undefined || typeof type !== 'string') throw new Error('stored row without a type')
+  const data = objectAt(record['data'])
+  return data === undefined ? { line } : { line, row: { value: record, type, data } }
+}
+
+/** One program invocation: its `tool/call` row through the matching result. */
 interface CallWindow {
   readonly callId: string
   readonly start: number
   readonly end: number
 }
 
-function callWindows(rows: readonly Row[]): CallWindow[] {
+/** Pair every `tool/call` with the first later result that settles that call id. */
+function callWindows(lines: readonly StoredLine[]): CallWindow[] {
   const windows: CallWindow[] = []
-  for (const [index, row] of rows.entries()) {
-    if (row.type !== 'tool/call') continue
+  for (const [index, entry] of lines.entries()) {
+    const row = entry.row
+    if (row?.type !== 'tool/call') continue
     const callId = row.data['callId']
     if (typeof callId !== 'string') continue
-    let end = rows.length - 1
-    for (let cursor = index + 1; cursor < rows.length; cursor += 1) {
-      const next = rows[cursor]
-      if (next === undefined) break
-      if (next.type === 'tool/call') { end = cursor - 1; break }
-      const message = next.data['message'] as Record<string, unknown> | undefined
-      const source = message?.['source'] as Record<string, unknown> | undefined
-      if (next.type === 'tool/result' && source?.['callId'] === callId) { end = cursor; break }
+    let end = lines.length - 1
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      const candidate = lines[cursor]?.row
+      if (candidate?.type !== 'tool/result') continue
+      const source = objectAt(objectAt(candidate.data['message'])?.['source'])
+      if (source?.['callId'] === callId) { end = cursor; break }
     }
     windows.push({ callId, start: index, end })
   }
   return windows
 }
 
-/**
- * Plan the renames one Session needs.
- * @param rows - stored rows in order.
- * @returns per-row replacement maps, empty when nothing collides.
- */
-export function planRepairs(rows: readonly Row[]): Map<number, Map<string, string>> {
-  const used = new Set<string>()
-  for (const row of rows) for (const id of referencedIds(row)) used.add(id)
-
-  const plan = new Map<number, Map<string, string>>()
-  const seenCallIds = new Set<string>()
-  for (const window of callWindows(rows)) {
-    const repeated = seenCallIds.has(window.callId)
-    seenCallIds.add(window.callId)
-    if (!repeated) continue
-    const mapping = new Map<string, string>()
-    for (let index = window.start; index <= window.end; index += 1) {
-      const row = rows[index]
-      if (row === undefined) continue
-      const { subCallId } = idSlots(row)
-      // Only ids this invocation starts are renumbered: a parent id that points
-      // outside the window belongs to an earlier, already admitted dispatch.
-      if (row.type !== 'tool/ptc-dispatch-start' || subCallId === undefined) continue
-      if (mapping.has(subCallId)) continue
-      if (!usedLater(rows, index, subCallId)) continue
-      let attempt = 1
-      let candidate = `${subCallId}#${attempt}`
-      while (used.has(candidate)) {
-        attempt += 1
-        candidate = `${subCallId}#${attempt}`
-      }
-      used.add(candidate)
-      mapping.set(subCallId, candidate)
-    }
-    if (mapping.size === 0) continue
-    for (let index = window.start; index <= window.end; index += 1) {
-      const row = rows[index]
-      if (row === undefined) continue
-      const hits = referencedIds(row).filter(id => mapping.has(id))
-      if (hits.length === 0) continue
-      const perRow = new Map<string, string>()
-      for (const hit of hits) {
-        const replacement = mapping.get(hit)
-        if (replacement !== undefined) perRow.set(hit, replacement)
-      }
-      plan.set(index, perRow)
-    }
-  }
-  return plan
-}
-
-/** Whether an id was recorded before `before`, which is what makes it a collision. */
-function usedLater(rows: readonly Row[], before: number, id: string): boolean {
-  for (let index = 0; index < before; index += 1) {
-    const row = rows[index]
-    if (row !== undefined && referencedIds(row).includes(id)) return true
-  }
-  return false
-}
-
-/** Replace recorded ids in one row, keeping every other byte of the row intact. */
-function rewriteRow(line: string, replacements: Map<string, string>): string {
-  let next = line
-  for (const [from, to] of replacements) {
-    const quoted = JSON.stringify(from)
-    if (!next.includes(quoted)) throw new Error(`row does not contain ${quoted}`)
-    next = next.split(quoted).join(JSON.stringify(to))
+/** Choose an id that no recorded value uses. */
+function freshId(candidate: string, used: ReadonlySet<string>): string {
+  let attempt = 1
+  let next = `${candidate}#${attempt}`
+  while (used.has(next)) {
+    attempt += 1
+    next = `${candidate}#${attempt}`
   }
   return next
 }
 
-/** Decode one stored log into rows while remembering which frame held each row. */
-async function decodeFrames(bytes: Buffer): Promise<{ rows: string[]; rowFrame: number[]; frames: { start: number; end: number }[] }> {
-  const scan = scanZstdFrames(bytes)
-  if (scan.tornStart !== undefined) throw new Error('the stored log ends in an incomplete frame; repair the tail first')
-  const rows: string[] = []
-  const rowFrame: number[] = []
-  for (const [frameIndex, frame] of scan.frames.entries()) {
-    const text = (await decompressZstdFrame(bytes.subarray(frame.start, frame.end))).toString('utf8')
-    const lines = text.split('\n')
-    if (lines.at(-1) !== '') throw new Error(`frame ${frameIndex} does not end on a row boundary`)
-    lines.pop()
-    for (const line of lines) {
-      rows.push(line)
-      rowFrame.push(frameIndex)
-    }
-  }
-  return { rows, rowFrame, frames: scan.frames }
+/** One planned rename and the rows it may touch. */
+interface PlannedRename {
+  readonly from: string
+  readonly to: string
+  /** Rows inside the repeated invocation, where every slot may be rewritten. */
+  readonly window: { readonly start: number; readonly end: number }
+  /** Rows after the invocation that may still reference the old id (late job records). */
+  readonly tailEnd: number
 }
 
-/** Rebuild the log, recompressing only frames that contain a changed row. */
+/**
+ * Plan the renames one Session needs. A repeated program call id whose
+ * invocation starts a sub-call id already recorded is the only collision this
+ * command repairs; starts that cannot be attributed to a program invocation are
+ * refused instead of guessed.
+ * @param lines - stored rows in order.
+ * @returns planned renames, in log order.
+ * @throws Error when a repeated start cannot be attributed to an invocation.
+ */
+export function planRepairs(lines: readonly StoredLine[]): PlannedRename[] {
+  const windows = callWindows(lines)
+  const starts = lines
+    .map((entry, index) => ({ index, row: entry.row }))
+    .filter((entry): entry is { index: number; row: StoredRow } => entry.row?.type === 'tool/ptc-dispatch-start')
+  const used = new Set<string>()
+  for (const entry of lines) if (entry.row !== undefined) for (const value of slotValues(entry.row)) used.add(value)
+
+  const plans: PlannedRename[] = []
+  const firstWindowByCallId = new Map<string, number>()
+  for (const [order, window] of windows.entries()) {
+    const previous = firstWindowByCallId.get(window.callId)
+    if (previous === undefined) { firstWindowByCallId.set(window.callId, order); continue }
+    let nextWindowStart = lines.length
+    for (const later of windows.slice(order + 1)) {
+      if (later.callId === window.callId) { nextWindowStart = later.start; break }
+    }
+    for (const entry of starts) {
+      if (entry.index < window.start || entry.index > window.end) continue
+      const subCallId = entry.row.data['subCallId']
+      if (typeof subCallId !== 'string') continue
+      const usedBefore = starts.some(other => other.index < window.start && other.row.data['subCallId'] === subCallId)
+      if (!usedBefore) continue
+      const to = freshId(subCallId, used)
+      used.add(to)
+      plans.push({ from: subCallId, to, window: { start: window.start, end: window.end }, tailEnd: nextWindowStart })
+    }
+  }
+  // A start that repeats an id but belongs to no program invocation cannot be
+  // repaired by attribution; refuse rather than guess.
+  for (const entry of starts) {
+    const subCallId = entry.row.data['subCallId']
+    if (typeof subCallId !== 'string') continue
+    const seenBefore = starts.some(other => other.index < entry.index && other.row.data['subCallId'] === subCallId)
+    if (!seenBefore) continue
+    const covered = plans.some(plan => plan.from === subCallId && entry.index >= plan.window.start && entry.index <= plan.window.end)
+    const attributed = windows.some(window => entry.index >= window.start && entry.index <= window.end)
+    if (!covered && !attributed) throw new Error(`repeated sub-call ${subCallId} at row ${entry.index + 1} has no enclosing program invocation`)
+  }
+  return plans
+}
+
+/** Build the per-row rename maps from the plan. */
+function rowRenames(lines: readonly StoredLine[], plans: readonly PlannedRename[]): Map<number, Map<string, string>> {
+  const perRow = new Map<number, Map<string, string>>()
+  for (const plan of plans) {
+    for (let index = plan.window.start; index <= plan.tailEnd && index < lines.length; index += 1) {
+      const row = lines[index]?.row
+      if (row === undefined) continue
+      const inWindow = index <= plan.window.end
+      const values = inWindow ? slotValues(row) : slotValues(row).filter(value => value === plan.from)
+      if (!values.includes(plan.from)) continue
+      if (!inWindow) {
+        // Outside the invocation only late records that join the id may follow
+        // it; sub-call start/settlement rows belong to another invocation.
+        if (row.type === 'tool/ptc-dispatch-start' || row.type === 'tool/ptc-dispatch') continue
+      }
+      const existing = perRow.get(index) ?? new Map<string, string>()
+      const previous = existing.get(plan.from)
+      if (previous !== undefined && previous !== plan.to) {
+        throw new Error(`row ${index + 1} would take ${plan.from} to two ids`)
+      }
+      existing.set(plan.from, plan.to)
+      perRow.set(index, existing)
+    }
+  }
+  return perRow
+}
+
+/** One decoded stored log: its rows and the frame that held each row. */
+interface DecodedLog {
+  readonly lines: StoredLine[]
+  /** Frame index per row, parallel to `lines`. */
+  readonly lineFrame: number[]
+  readonly frames: { start: number; end: number }[]
+}
+
+/** Decode one stored log into rows while remembering which frame held each line. */
+async function decodeFrames(bytes: Buffer): Promise<DecodedLog> {
+  const scan = scanZstdFrames(bytes)
+  if (scan.tornStart !== undefined) throw new Error('the stored log ends in an incomplete frame; repair the tail first')
+  const lines: StoredLine[] = []
+  const lineFrame: number[] = []
+  for (const [frameIndex, frame] of scan.frames.entries()) {
+    const text = (await decompressZstdFrame(bytes.subarray(frame.start, frame.end))).toString('utf8')
+    const rows = text.split('\n')
+    if (rows.at(-1) !== '') throw new Error(`frame ${frameIndex} does not end on a row boundary`)
+    rows.pop()
+    for (const line of rows) {
+      lines.push(parseLine(line))
+      lineFrame.push(frameIndex)
+    }
+  }
+  return { lines, lineFrame, frames: scan.frames }
+}
+
+/** Rebuild the log, recompressing only frames that contain a changed line. */
 async function encodeFrames(
   bytes: Buffer,
   frames: readonly { start: number; end: number }[],
-  rows: readonly string[],
-  rowFrame: readonly number[],
+  lines: readonly StoredLine[],
+  lineFrame: readonly number[],
   rewritten: ReadonlyMap<number, string>,
 ): Promise<Buffer> {
   const counts = frames.map(() => 0)
-  for (const frameIndex of rowFrame) counts[frameIndex] = (counts[frameIndex] ?? 0) + 1
+  for (const frameIndex of lineFrame) counts[frameIndex] = (counts[frameIndex] ?? 0) + 1
   const pieces: Buffer[] = []
   let cursor = 0
   for (const [frameIndex, frame] of frames.entries()) {
@@ -267,18 +338,71 @@ async function encodeFrames(
       if (rewritten.has(index)) { changed = true; break }
     }
     if (changed) {
-      const lines: string[] = []
+      const rows: string[] = []
       for (let index = cursor; index < cursor + count; index += 1) {
-        const line = rewritten.get(index) ?? rows[index]
-        if (line !== undefined) lines.push(line)
+        const line = rewritten.get(index) ?? lines[index]?.line
+        if (line !== undefined) rows.push(line)
       }
-      pieces.push(await compressZstdFrame(`${lines.join('\n')}\n`))
+      pieces.push(await compressZstdFrame(`${rows.join('\n')}\n`))
     } else {
       pieces.push(bytes.subarray(frame.start, frame.end))
     }
     cursor += count
   }
   return Buffer.concat(pieces)
+}
+
+/** Verify that only intended id fields changed and no start id repeats. */
+function verifyRewrite(
+  before: readonly StoredLine[],
+  after: readonly StoredLine[],
+  perRow: ReadonlyMap<number, ReadonlyMap<string, string>>,
+): void {
+  if (before.length !== after.length) throw new Error('the repaired log changed its row count')
+  for (let index = 0; index < before.length; index += 1) {
+    const original = before[index]
+    const next = after[index]
+    if (original === undefined || next === undefined) throw new Error(`row ${index + 1} disappeared`)
+    const renames = perRow.get(index)
+    if (renames === undefined) {
+      if (next.line !== original.line) throw new Error(`row ${index + 1} changed unexpectedly`)
+      continue
+    }
+    if (original.row === undefined || next.row === undefined) throw new Error(`row ${index + 1} changed its kind`)
+    const expected = JSON.stringify(rewriteSlots(original.row, renames))
+    if (next.line !== expected) throw new Error(`row ${index + 1} changed beyond its id fields`)
+  }
+  const starts = new Set<string>()
+  for (const entry of after) {
+    if (entry.row?.type !== 'tool/ptc-dispatch-start') continue
+    const id = entry.row.data['subCallId']
+    if (typeof id !== 'string') continue
+    if (starts.has(id)) throw new Error(`the repaired log still repeats ${id}`)
+    starts.add(id)
+  }
+}
+
+function timestamp(): string {
+  return new Date().toISOString().replace(/[:.]/g, '-')
+}
+
+/** Publish the repaired bytes under the Session's write claim. */
+async function publish(path: string, bytes: Buffer, repaired: Buffer, backupRoot: string): Promise<void> {
+  const current = await readFile(path)
+  if (!current.equals(bytes)) throw new Error('the stored log changed while it was being repaired; nothing was written')
+  const backupDir = join(backupRoot, basename(dirname(path)), timestamp())
+  await mkdir(backupDir, { recursive: true, mode: 0o700 })
+  await writeFile(join(backupDir, basename(path)), bytes)
+  const staged = `${path}.repair`
+  try {
+    await writeFile(staged, repaired, { flag: 'wx' })
+    const handle = await open(staged, 'r+')
+    try { await handle.sync() } finally { await handle.close() }
+    await rename(staged, path)
+  } catch (error: unknown) {
+    await rm(staged, { force: true })
+    throw error
+  }
 }
 
 /**
@@ -295,70 +419,38 @@ export async function repairSessionLog(
   const sessionId = brandString<SessionId>(basename(sessionDir).replace(/^session-/, ''))
   let lease: SessionWriteLease | undefined
   try {
+    if (options.apply) {
+      // The claim is taken before any read: a writer that appends and releases
+      // between our read and our replacement would otherwise be overwritten.
+      lease = await SessionWriteLease.acquire(sessionDir, sessionId)
+    }
     const bytes = await readFile(path)
     const decoded = await decodeFrames(bytes)
-    const rows = decoded.rows.map((line, index) => {
-      try {
-        return JSON.parse(line) as Row
-      } catch (error: unknown) {
-        throw new Error(`row ${index + 1}: ${error instanceof Error ? error.message : String(error)}`)
-      }
-    })
-    const plan = planRepairs(rows)
-    const renames = [...new Map([...plan.values()].flatMap(perRow => [...perRow])).entries()]
-      .map(([from, to]) => ({ from, to }))
-    if (renames.length === 0) return { path, status: 'clean', renames: [] }
-
+    const plans = planRepairs(decoded.lines)
+    const renames = plans.map(plan => ({ from: plan.from, to: plan.to }))
+    if (plans.length === 0) return { path, status: 'clean', renames: [] }
     if (!options.apply) return { path, status: 'planned', renames }
 
-    lease = await SessionWriteLease.acquire(sessionDir, sessionId)
+    const perRow = rowRenames(decoded.lines, plans)
     const rewritten = new Map<number, string>()
-    for (const [index, replacements] of plan) {
-      const original = decoded.rows[index]
-      if (original === undefined) throw new Error(`row ${index + 1} is missing from the stored log`)
-      const line = rewriteRow(original, replacements)
-      JSON.parse(line)
-      rewritten.set(index, line)
+    for (const [index, mapping] of perRow) {
+      const row = decoded.lines[index]?.row
+      if (row === undefined) continue
+      rewritten.set(index, JSON.stringify(rewriteSlots(row, mapping)))
     }
-    const repaired = await encodeFrames(bytes, decoded.frames, decoded.rows, decoded.rowFrame, rewritten)
-
-    // Self-verification: same rows, intended changes only, valid frames, no repeats.
-    const verified = await decodeFrames(repaired)
-    if (verified.rows.length !== decoded.rows.length) throw new Error('the repaired log changed its row count')
-    const starts = new Set<string>()
-    for (const [index, line] of verified.rows.entries()) {
-      const row = JSON.parse(line) as Row
-      if (row.type !== 'tool/ptc-dispatch-start') continue
-      const id = idSlots(row).subCallId
-      if (id === undefined) continue
-      if (starts.has(id)) throw new Error(`the repaired log still repeats ${id} at row ${index + 1}`)
-      starts.add(id)
-      if (line !== decoded.rows[index] && !rewritten.has(index)) throw new Error(`row ${index + 1} changed unexpectedly`)
-    }
-
-    const backupDir = join(options.backupRoot, basename(sessionDir), timestamp())
-    await mkdir(backupDir, { recursive: true, mode: 0o700 })
-    await copyFile(path, join(backupDir, basename(path)))
-    const staged = `${path}.repair`
-    try {
-      await writeFile(staged, repaired)
-      await rename(staged, path)
-    } catch (error: unknown) {
-      await rm(staged, { force: true })
-      throw error
-    }
+    const repaired = await encodeFrames(bytes, decoded.frames, decoded.lines, decoded.lineFrame, rewritten)
+    verifyRewrite(decoded.lines, (await decodeFrames(repaired)).lines, perRow)
+    // Publication is the last step, so a rejection here means nothing was
+    // replaced; the reason therefore always describes a file left untouched.
+    await publish(path, bytes, repaired, options.backupRoot)
     return { path, status: 'repaired', renames }
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error)
     const refused = error instanceof Error && error.name === 'SessionAlreadyOwnedError'
+    const message = error instanceof Error ? error.message : String(error)
     return { path, status: refused ? 'refused' : 'failed', renames: [], reason: message }
   } finally {
     await lease?.release()
   }
-}
-
-function timestamp(): string {
-  return new Date().toISOString().replace(/[:.]/g, '-')
 }
 
 /**
@@ -372,7 +464,8 @@ export async function discoverSessionLogs(sessionsDir: string): Promise<string[]
     if (!project.isDirectory()) continue
     const projectDir = join(sessionsDir, project.name)
     for (const session of await readdir(projectDir, { withFileTypes: true })) {
-      if (!session.isDirectory() || !session.name.startsWith('session-')) continue
+      // Stored Session directories are either `session-<id>` or the bare id.
+      if (!session.isDirectory()) continue
       const sessionDir = join(projectDir, session.name)
       for (const file of await readdir(sessionDir, { withFileTypes: true })) {
         if (file.isFile() && STORED_LOG_PATTERN.test(file.name)) found.push(join(sessionDir, file.name))

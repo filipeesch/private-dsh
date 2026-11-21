@@ -1133,7 +1133,7 @@ Source: [`packages/core/session/src/types.ts:369`](../packages/core/session/src/
 'tool/ptc-dispatch': PtcDispatchEventData
 ```
 
-Source: [`packages/core/tool-executor-ptc/src/types.ts:63`](../packages/core/tool-executor-ptc/src/types.ts)
+Source: [`packages/core/tool-executor-ptc/src/types.ts:64`](../packages/core/tool-executor-ptc/src/types.ts)
 
 <a id="toolptc-dispatch-start--log-only"></a>
 
@@ -1142,10 +1142,11 @@ Source: [`packages/core/tool-executor-ptc/src/types.ts:63`](../packages/core/too
 ```ts persistence-catalog
 /**
  * One sub-dispatch STARTING inside a `run_code` program: the parent
- * `run_code` call id, the opaque sub-call id (new calls use
- * `<parent>:ptc:<turn>:<step>:<n>` — enclosing call, owning model step, and
- * submission-order attempt — so a provider that reuses one tool-call id across
- * steps cannot repeat an id within the log), and the tool `name` with its
+ * `run_code` call id, the opaque sub-call id (a root dispatch uses
+ * `<parent>:ptc:<turn>:<step>:<n>`, a nested one `<parentSubCallId>+<n>`,
+ * carrying the enclosing call, owning model step, and submission-order
+ * attempt, so a provider that reuses one tool-call id across steps cannot
+ * repeat an id within the log), and the tool `name` with its
  * JSON-normalized `arguments` — the exact value dispatched, normalized
  * BEFORE dispatch, so this append can never fail on payload shape.
  * Appended when the scheduler actually starts the call (not at
@@ -1158,7 +1159,7 @@ Source: [`packages/core/tool-executor-ptc/src/types.ts:63`](../packages/core/too
 'tool/ptc-dispatch-start': PtcDispatchStartEventData
 ```
 
-Source: [`packages/core/tool-executor-ptc/src/types.ts:47`](../packages/core/tool-executor-ptc/src/types.ts)
+Source: [`packages/core/tool-executor-ptc/src/types.ts:48`](../packages/core/tool-executor-ptc/src/types.ts)
 
 <a id="toolresult--surface"></a>
 
@@ -7228,7 +7229,7 @@ Sources: [`packages/session/session-title/src/types.ts:30`](../packages/session/
 
 SHA-256: `dba54c09c6e7aafc9acbed7792ecc920d99f92d0784aeeed10af55f7fe0bc8cd`
 
-Sources: [`packages/core/tool-executor-ptc/src/types.ts:70`](../packages/core/tool-executor-ptc/src/types.ts)
+Sources: [`packages/core/tool-executor-ptc/src/types.ts:71`](../packages/core/tool-executor-ptc/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|

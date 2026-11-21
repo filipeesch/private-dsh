@@ -252,11 +252,11 @@
   en: 2edbe249bcd484fc
   zh: fa838ad8325507b4
 /session-persistence-event-catalog/events/tool/tool-ptc-dispatch-log-only:
-  en: 7fd949de55c5716e
-  zh: 598d5546a3491f2e
+  en: 7e288c45e917c1de
+  zh: d74e35be04d07492
 /session-persistence-event-catalog/events/tool/tool-ptc-dispatch-start-log-only:
-  en: bd29b1946d55b158
-  zh: 3cb39141059a9320
+  en: 1a2ad3e1813bc69f
+  zh: 1b5ae84fc29bbf7e
 /session-persistence-event-catalog/events/tool/tool-result-surface:
   en: e5fdf9592ffa86b4
   zh: 7455727a8f208a1c
@@ -1740,8 +1740,8 @@
   en: c53129cf7214286c
   zh: 8c5183b6dabbf714
 /session-persistence-event-catalog/resolved-persistence-types/kind-ptc-mode:
-  en: 53ba3bf5095a6e4d
-  zh: 4ba201231a8c4a4c
+  en: e3e754da8f9b41c4
+  zh: b54d916145452b1e
 /session-persistence-event-catalog/resolved-persistence-types/kind-repeat-tool-reminder:
   en: e3a0ef98a197374e
   zh: 95e9363529a62cc3

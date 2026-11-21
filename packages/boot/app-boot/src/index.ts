@@ -873,9 +873,10 @@ export const FAIL_LOUD_RELEASE_TIMEOUT_MS = 2_000
  * handler would strand raw mode, bracketed paste, and the keyboard protocol on
  * the user's shell, and leave an in-flight terminal query's reply to land as
  * literal text at the next prompt. `release` is the terminal owner's chance to
- * hand it back; it is awaited under {@link FAIL_LOUD_RELEASE_TIMEOUT_MS}, whose
- * timer stays referenced so a never-settling disposer cannot let Node reach an
- * empty event loop and exit 0 instead of failing.
+ * hand it back; it is awaited under `releaseTimeoutMs` (default
+ * {@link FAIL_LOUD_RELEASE_TIMEOUT_MS}), whose timer stays referenced so a
+ * never-settling disposer cannot let Node reach an empty event loop and exit 0
+ * instead of failing.
  *
  * The diagnostic is written before the release so a hanging or failing disposer
  * cannot swallow the reason. The handler stays installed while the release runs
@@ -888,12 +889,15 @@ export const FAIL_LOUD_RELEASE_TIMEOUT_MS = 2_000
  * @param release - optional teardown awaited before exit, used by a
  *   terminal-owning surface to restore the terminal. Its own failure is
  *   swallowed because the pending fatal exit already owns the outcome.
+ * @param releaseTimeoutMs - bound on {@link release}; callers whose teardown owns
+ *   a longer ordered shutdown pass their own bound instead of the default.
  * @returns the uninstaller that removes both handlers.
  */
 export function installFailLoud(
   binName: string,
   proc: FailLoudProcess = process,
   release?: () => Promise<void> | void,
+  releaseTimeoutMs = FAIL_LOUD_RELEASE_TIMEOUT_MS,
 ): () => void {
   let exiting = false
   const report = (err: unknown, label: string): void => {
@@ -915,7 +919,7 @@ export function installFailLoud(
         await Promise.race([
           (async () => release())(),
           new Promise<void>((resolve) => {
-            timer = setTimeout(resolve, FAIL_LOUD_RELEASE_TIMEOUT_MS)
+            timer = setTimeout(resolve, releaseTimeoutMs)
           }),
         ])
       } catch {

@@ -76,9 +76,20 @@ describe('PTC sub-call identity', () => {
   it('carries the owning model step and keeps the legacy shape without one', () => {
     const callId = brandString<ToolCallId>('call-1')
 
-    expect(String(ptcSubCallId(callId, { turn: 2, step: 5 }, 1))).toBe('call-1:ptc:2:5:1')
-    expect(String(ptcSubCallId(callId, { turn: 2, step: 5 }, 3))).toBe('call-1:ptc:2:5:3')
-    expect(String(ptcSubCallId(callId, undefined, 1))).toBe('call-1:ptc:1')
+    expect(String(ptcSubCallId({ callId, position: { turn: 2, step: 5 } }, 1))).toBe('call-1:ptc:2:5:1')
+    expect(String(ptcSubCallId({ callId, position: { turn: 2, step: 5 } }, 3))).toBe('call-1:ptc:2:5:3')
+    expect(String(ptcSubCallId({ callId }, 1))).toBe('call-1:ptc:1')
+  })
+
+  it('keeps nested ids in a shape no provider id can alias', () => {
+    // A provider may advertise the root id `x:ptc:1:1:1` beside `x`. Root ids
+    // embed the call id and step, so nesting must not: an aliasing provider id
+    // would otherwise mint the same nested id twice.
+    const parent = brandString<ToolCallId>('x:ptc:1:1:1')
+    expect(String(ptcSubCallId({ callId: parent, position: { turn: 1, step: 1 } }, 1)))
+      .toBe('x:ptc:1:1:1:ptc:1:1:1')
+    expect(String(ptcSubCallId({ callId: parent, parent: Symbol('parent') as never }, 1)))
+      .toBe('x:ptc:1:1:1+1')
   })
 
   it('keeps ids distinct when a provider reuses one call id across consecutive steps', async () => {

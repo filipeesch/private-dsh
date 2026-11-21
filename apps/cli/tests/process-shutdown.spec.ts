@@ -3,6 +3,7 @@ import {
   createProcessShutdown,
   PROCESS_SHUTDOWN_TIMEOUT_MS,
   SHUTDOWN_BARRIER_BUDGET_MS,
+  SHUTDOWN_CHILD_BUDGET_MS,
   type ShutdownPhase,
 } from '../src/process-shutdown.ts'
 
@@ -12,9 +13,9 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve }
 }
 
-/** Flush pending microtasks so a forced path can reach its exit call. */
+/** Flush pending microtasks so a reserved path can reach its exit call. */
 async function settle(): Promise<void> {
-  for (let tick = 0; tick < 8; tick += 1) await Promise.resolve()
+  for (let tick = 0; tick < 12; tick += 1) await Promise.resolve()
 }
 
 afterEach(() => {
@@ -23,10 +24,11 @@ afterEach(() => {
 })
 
 describe('process shutdown', () => {
-  it('pins the committed deadline and the barrier reserve', () => {
+  it('bounds the shutdown with one hard deadline that contains the reserves', () => {
     expect(PROCESS_SHUTDOWN_TIMEOUT_MS).toBe(10_000)
     expect(SHUTDOWN_BARRIER_BUDGET_MS).toBeGreaterThan(0)
-    expect(SHUTDOWN_BARRIER_BUDGET_MS).toBeLessThan(PROCESS_SHUTDOWN_TIMEOUT_MS)
+    expect(SHUTDOWN_CHILD_BUDGET_MS).toBeGreaterThan(0)
+    expect(SHUTDOWN_BARRIER_BUDGET_MS + SHUTDOWN_CHILD_BUDGET_MS).toBeLessThan(PROCESS_SHUTDOWN_TIMEOUT_MS)
   })
 
   it('runs the phases in order before recording natural completion', async () => {
@@ -127,69 +129,108 @@ describe('process shutdown', () => {
     expect(exit).not.toHaveBeenCalled()
   })
 
-  it('reports pending phases and still runs the barrier when the deadline expires', async () => {
-    vi.useFakeTimers()
+  it('lets a fatal failure join a pending signal shutdown without changing its code', async () => {
+    const disposal = deferred()
     const flush = vi.fn(() => Promise.resolve())
+    const exit = vi.fn()
+    const complete = vi.fn()
+    const shutdown = createProcessShutdown([
+      { name: 'quiesce', run: () => disposal.promise },
+      { name: 'flush', barrier: true, run: flush },
+    ], { forceExit: exit, complete })
+
+    shutdown.interrupt(130)
+    await settle()
+    // The fatal path calls shutdown(1); it must join, not override, the request.
+    const joined = shutdown.shutdown(1)
+
+    disposal.resolve()
+    await joined
+
+    expect(flush).toHaveBeenCalledOnce()
+    expect(exit).toHaveBeenCalledOnce()
+    expect(exit).toHaveBeenCalledWith(130)
+    expect(complete).not.toHaveBeenCalled()
+  })
+
+  it('runs the barrier and the remaining phases when a phase stalls, then exits inside the deadline', async () => {
+    const order: string[] = []
     const exit = vi.fn()
     const report = vi.fn()
     const phases: ShutdownPhase[] = [
       { name: 'quiesce', run: () => new Promise<void>(() => {}) },
-      { name: 'flush', barrier: true, run: flush },
-      { name: 'teardown', run: () => Promise.resolve() },
+      { name: 'flush', barrier: true, run: async () => { order.push('flush') } },
+      { name: 'teardown', run: async () => { order.push('teardown') } },
     ]
-    const shutdown = createProcessShutdown(phases, { forceExit: exit, report, timeoutMs: 1_000, barrierBudgetMs: 200 })
+    const shutdown = createProcessShutdown(phases, {
+      forceExit: exit, report, timeoutMs: 400, barrierBudgetMs: 40, childBudgetMs: 40,
+    })
 
     shutdown.interrupt(130)
-    await vi.advanceTimersByTimeAsync(1_000)
-    await settle()
+    await shutdown.shutdown(130)
 
-    expect(report).toHaveBeenCalledWith(expect.stringContaining('did not finish within 1000ms'))
-    expect(report).toHaveBeenCalledWith(expect.stringContaining('pending: quiesce, teardown'))
-    expect(flush).toHaveBeenCalledOnce()
-
-    await settle()
+    expect(order).toEqual(['flush', 'teardown'])
+    expect(report).toHaveBeenCalledWith(expect.stringContaining('did not finish'))
     expect(exit).toHaveBeenCalledOnce()
     expect(exit).toHaveBeenCalledWith(130)
   })
 
-  it('abandons a barrier that outlives its reserve and exits anyway', async () => {
-    vi.useFakeTimers()
-    const flush = vi.fn(() => new Promise<void>(() => {}))
+  it('abandons a barrier that outlives its reserve and still signals owned children', async () => {
+    const teardown = vi.fn(() => Promise.resolve())
     const exit = vi.fn()
     const report = vi.fn()
     const shutdown = createProcessShutdown([
       { name: 'quiesce', run: () => new Promise<void>(() => {}) },
-      { name: 'flush', barrier: true, run: flush },
-    ], { forceExit: exit, report, timeoutMs: 1_000, barrierBudgetMs: 200 })
+      { name: 'flush', barrier: true, run: () => new Promise<void>(() => {}) },
+      { name: 'teardown', run: teardown },
+    ], { forceExit: exit, report, timeoutMs: 400, barrierBudgetMs: 40, childBudgetMs: 40 })
 
     shutdown.interrupt(130)
-    await vi.advanceTimersByTimeAsync(1_000)
-    await settle()
-    expect(exit).not.toHaveBeenCalled()
+    await shutdown.shutdown(130)
 
-    await vi.advanceTimersByTimeAsync(200)
-    await settle()
-
-    expect(flush).toHaveBeenCalledOnce()
-    expect(report).toHaveBeenCalledWith(expect.stringContaining('did not finish within its 200ms reserve'))
+    expect(report).toHaveBeenCalledWith(expect.stringContaining('"flush" did not finish within its'))
+    expect(teardown).toHaveBeenCalledOnce()
     expect(exit).toHaveBeenCalledOnce()
     expect(exit).toHaveBeenCalledWith(130)
   })
 
-  it('reports a failing phase and exits with the request code', async () => {
+  it('reports a failing phase, still runs the reserved steps, and exits with the request code', async () => {
+    const barrier = vi.fn(() => Promise.resolve())
+    const teardown = vi.fn(() => Promise.resolve())
     const exit = vi.fn()
     const report = vi.fn()
     const shutdown = createProcessShutdown([
-      { name: 'flush', run: () => Promise.resolve() },
-      { name: 'teardown', run: () => Promise.reject(new Error('dispose failed')) },
+      { name: 'quiesce', run: () => Promise.reject(new Error('cancel failed')) },
+      { name: 'flush', barrier: true, run: barrier },
+      { name: 'teardown', run: teardown },
     ], { forceExit: exit, report })
 
     shutdown.interrupt(143)
     await shutdown.shutdown(143)
 
-    expect(report).toHaveBeenCalledWith(expect.stringContaining('phase "teardown"'))
-    expect(report).toHaveBeenCalledWith(expect.stringContaining('dispose failed'))
+    expect(report).toHaveBeenCalledWith(expect.stringContaining('phase "quiesce"'))
+    expect(report).toHaveBeenCalledWith(expect.stringContaining('cancel failed'))
+    expect(barrier).toHaveBeenCalledOnce()
+    expect(teardown).toHaveBeenCalledOnce()
     expect(exit).toHaveBeenCalledOnce()
     expect(exit).toHaveBeenCalledWith(143)
+  })
+
+  it('exits even when the diagnostic reporter throws', async () => {
+    const exit = vi.fn()
+    const shutdown = createProcessShutdown([
+      { name: 'quiesce', run: () => new Promise<void>(() => {}) },
+      { name: 'flush', barrier: true, run: () => Promise.resolve() },
+    ], {
+      forceExit: exit,
+      report: () => { throw new Error('stderr is gone') },
+      timeoutMs: 400, barrierBudgetMs: 40, childBudgetMs: 40,
+    })
+
+    shutdown.interrupt(130)
+    await shutdown.shutdown(130)
+
+    expect(exit).toHaveBeenCalledOnce()
+    expect(exit).toHaveBeenCalledWith(130)
   })
 })

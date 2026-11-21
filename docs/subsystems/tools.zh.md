@@ -428,7 +428,11 @@ interface PtcDispatchLog {
   readonly exec: ToolExecution
   /** The calling agent (the scope routing key and the spill owner), when the outer call has one. */
   readonly agent?: Agent
-  /** Opaque sub-call id; new calls use `<parent>:ptc:<turn>:<step>:<n>`, or `<parent>:ptc:<n>` outside a model step. */
+  /**
+   * Opaque sub-call id: a root dispatch uses `<parent>:ptc:<turn>:<step>:<n>`, a
+   * nested one `<parentSubCallId>+<n>`, and a call outside a model step keeps
+   * `<parent>:ptc:<n>`.
+   */
   readonly subCallId: ToolCallId
   /** The dispatched sub-tool name. */
   readonly name: string

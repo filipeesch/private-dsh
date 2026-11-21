@@ -1135,7 +1135,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'tool/ptc-dispatch': PtcDispatchEventData
 ```
 
-来源：[`packages/core/tool-executor-ptc/src/types.ts:63`](../packages/core/tool-executor-ptc/src/types.ts)
+来源：[`packages/core/tool-executor-ptc/src/types.ts:64`](../packages/core/tool-executor-ptc/src/types.ts)
 
 <a id="toolptc-dispatch-start--log-only"></a>
 
@@ -1144,10 +1144,11 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 ```ts persistence-catalog
 /**
  * One sub-dispatch STARTING inside a `run_code` program: the parent
- * `run_code` call id, the opaque sub-call id (new calls use
- * `<parent>:ptc:<turn>:<step>:<n>` — enclosing call, owning model step, and
- * submission-order attempt — so a provider that reuses one tool-call id across
- * steps cannot repeat an id within the log), and the tool `name` with its
+ * `run_code` call id, the opaque sub-call id (a root dispatch uses
+ * `<parent>:ptc:<turn>:<step>:<n>`, a nested one `<parentSubCallId>+<n>`,
+ * carrying the enclosing call, owning model step, and submission-order
+ * attempt, so a provider that reuses one tool-call id across steps cannot
+ * repeat an id within the log), and the tool `name` with its
  * JSON-normalized `arguments` — the exact value dispatched, normalized
  * BEFORE dispatch, so this append can never fail on payload shape.
  * Appended when the scheduler actually starts the call (not at
@@ -1160,7 +1161,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'tool/ptc-dispatch-start': PtcDispatchStartEventData
 ```
 
-来源：[`packages/core/tool-executor-ptc/src/types.ts:47`](../packages/core/tool-executor-ptc/src/types.ts)
+来源：[`packages/core/tool-executor-ptc/src/types.ts:48`](../packages/core/tool-executor-ptc/src/types.ts)
 
 <a id="toolresult--surface"></a>
 
@@ -7230,7 +7231,7 @@ SHA-256: `b81e9de81a481b24e1e1f9adf038bfc59e57b4f35ce62f8f1e45284186f4f812`
 
 SHA-256: `dba54c09c6e7aafc9acbed7792ecc920d99f92d0784aeeed10af55f7fe0bc8cd`
 
-来源：[`packages/core/tool-executor-ptc/src/types.ts:70`](../packages/core/tool-executor-ptc/src/types.ts)
+来源：[`packages/core/tool-executor-ptc/src/types.ts:71`](../packages/core/tool-executor-ptc/src/types.ts)
 
 | 属性 | 存在性 | 类型 |
 |---|---|---|

@@ -31,10 +31,11 @@ declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
     /**
      * One sub-dispatch STARTING inside a `run_code` program: the parent
-     * `run_code` call id, the opaque sub-call id (new calls use
-     * `<parent>:ptc:<turn>:<step>:<n>` — enclosing call, owning model step, and
-     * submission-order attempt — so a provider that reuses one tool-call id across
-     * steps cannot repeat an id within the log), and the tool `name` with its
+     * `run_code` call id, the opaque sub-call id (a root dispatch uses
+     * `<parent>:ptc:<turn>:<step>:<n>`, a nested one `<parentSubCallId>+<n>`,
+     * carrying the enclosing call, owning model step, and submission-order
+     * attempt, so a provider that reuses one tool-call id across steps cannot
+     * repeat an id within the log), and the tool `name` with its
      * JSON-normalized `arguments` — the exact value dispatched, normalized
      * BEFORE dispatch, so this append can never fail on payload shape.
      * Appended when the scheduler actually starts the call (not at
