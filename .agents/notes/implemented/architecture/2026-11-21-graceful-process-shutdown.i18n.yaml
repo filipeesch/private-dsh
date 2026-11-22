@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-11-21-graceful-process-shutdown.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-11-21-graceful-process-shutdown.md
+/agent-note-process-shutdown-is-one-idempotent-durable-first-sequence:
+  en: 9997594d40523979
+  zh: 35bf2ed988c2b593
+/agent-note-process-shutdown-is-one-idempotent-durable-first-sequence/problem:
+  en: 76ad3fac3ff48de4
+  zh: 33c4d8d334ce5631
+/agent-note-process-shutdown-is-one-idempotent-durable-first-sequence/decision:
+  en: 8f0af1eab669c41f
+  zh: 5a5bd18ce338c0c2
+/agent-note-process-shutdown-is-one-idempotent-durable-first-sequence/alternatives-considered:
+  en: 8c71775e3d269564
+  zh: f98d84dc4d231583
+/agent-note-process-shutdown-is-one-idempotent-durable-first-sequence/consequences:
+  en: 119a7b348642478b
+  zh: d775f5d0d8f7b83d

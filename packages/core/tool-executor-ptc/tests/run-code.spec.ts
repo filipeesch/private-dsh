@@ -65,13 +65,18 @@ async function setup(definition: ToolDefinition, limits?: Partial<RunCodeConfig>
       ...limits === undefined ? {} : { limits },
     }))
   }, { inject: ['tools'] }))
-  const execute = async (args: Record<string, unknown> = {}, name = 'cua_run_code') => {
+  const execute = async (
+    args: Record<string, unknown> = {},
+    name = 'cua_run_code',
+    log?: { turn: number; step: number },
+  ) => {
     const signal = new AbortController().signal
     const toolSet = await ctx.tools.resolve({ agent, modelSelection: { provider: 'test', model: 'test' }, signal })
     try {
       return await ctx.tools.execute({
         calls: [{ type: 'tool-call', id: brandString<ToolCallId>('program'), name, arguments: JSON.stringify({ code: 'await cua.inspect()', description: 'Inspect the current computer', ...args }) }],
         agent, toolSet, signal,
+        ...log === undefined ? {} : { log },
       })
     } finally { toolSet.dispose() }
   }
@@ -79,6 +84,23 @@ async function setup(definition: ToolDefinition, limits?: Partial<RunCodeConfig>
 }
 
 describe('registered program tool factory', () => {
+  it('carries the owning model step into nested dispatch ids', async () => {
+    const definition = privateTool()
+    const { runtime, session, execute } = await setup(definition)
+    runtime.behavior = async (request) => {
+      await request.bindings[0]!.functions.cua!({})
+      return { output: [] }
+    }
+
+    await execute({}, 'cua_run_code', { turn: 2, step: 7 })
+    await execute({}, 'cua_run_code', { turn: 2, step: 8 })
+
+    const starts = session.snapshotEvents()
+      .filter(event => event.type === 'tool/ptc-dispatch-start')
+      .map(event => String(event.data.subCallId))
+    expect(starts).toEqual(['program:ptc-2026-11:2:7:1', 'program:ptc-2026-11:2:8:1'])
+  })
+
   it.each(['python', 'ruby', 'constructor'])('rejects unsupported runtime %s before creating a program tool', async (language) => {
     const ctx = new Context()
     onTestFinished(async () => { await ctx.fiber.dispose() })
@@ -191,7 +213,7 @@ describe('registered program tool factory', () => {
     const events = session.snapshotEvents().filter(event => event.type === 'tool/ptc-dispatch-start' || event.type === 'tool/ptc-dispatch')
     expect(events.map(event => event.type)).toEqual(['tool/ptc-dispatch-start', 'tool/ptc-dispatch'])
     expect(events[1]?.data).toMatchObject({
-      rootCallId: 'program', parentCallId: 'program', subCallId: 'program:ptc:1', name: 'capture', arguments: {},
+      rootCallId: 'program', parentCallId: 'program', subCallId: 'program:ptc-2026-11:1', name: 'capture', arguments: {},
       isError: false, content: [{ type: 'text', text: 'durable screenshot preview' }], meta: { screen: 1 },
     })
   })

@@ -133,6 +133,21 @@ The terminal reports each Session's selected file, version, progress, outcome, a
 
 Concurrent conversion can invalidate a parent’s child evidence when the child publishes V4. Only that source-change error receives one sequential retry after all initial jobs finish; corruption, unsupported formats, and held locks are reported immediately. Completion lines keep the original input index and a separate completed count, so out-of-order results remain readable.
 
+<a id="ptc-dispatch-repair"></a>
+### Repairing colliding PTC dispatch ids
+
+A log recorded by a release that numbered PTC sub-calls per program invocation can repeat a sub-call id when the provider reused one tool-call id across consecutive steps, and the format reader refuses the whole log. Stop DSH processes using the target root first: the command takes the Session's write claim, and a claim a live process holds is refused rather than ignored.
+
+Run from the repository root:
+
+```sh
+pnpm run repair:sessions-ptc
+```
+
+The command reads the compressed V3 and V4 Session logs stored as `session.v<version>.jsonl.zstd` under `~/.dsh/sessions`; a log's generation comes from its recorded header, not from the command. `--sessions-dir PATH` selects another root. Without `--apply` it is a dry run: it lists each planned rename and writes nothing. With `--apply` it copies the original bytes to `~/.dsh/session-repair-backups/<session>/<timestamp>/` (`--backup-dir PATH` selects another root) and rewrites only recorded id fields of the later colliding invocation — its dispatch ids, the parent references of nested dispatches, and late job records that join the id — then recompresses only the frames that changed. Every other row stays byte-identical, including the Session header and every event envelope.
+
+It refuses, without touching the file, a log whose final frame is incomplete, a Session whose write claim a live process holds, a repeated start it cannot attribute to a program invocation, and any record that names a renumbered sub-call outside the rows it knows how to rewrite. A reply that settles a timed program question is one of them: the projection joins it by the exact sub-call id, so a Session whose answered question was renumbered is refused whether the reply was recorded on the surface or queued through the agent inbox. One failing Session does not stop the others; the summary and the JSON report in the system temporary directory list every outcome. Restore a Session by copying its backup over the repaired file.
+
 <a id="final-v3-vocabulary"></a>
 ### Final V3 event vocabulary before V4 publication
 

@@ -112,6 +112,7 @@
     "publint": "tsx scripts/publint-all.ts",
     "publish:npm-baseline": "tsx scripts/publish-npm-baseline.ts",
     "purge:latest": "pnpm --filter @deepseek-ai/dsh-desktop run purge:latest",
+    "repair:sessions-ptc": "tsx scripts/repair-session-ptc-dispatch.ts",
     "release:dsh": "tsx scripts/release/bump.ts --family dsh",
     "release:pack": "tsx scripts/release/pack.ts",
     "release:publish": "tsx scripts/release/publish.ts",

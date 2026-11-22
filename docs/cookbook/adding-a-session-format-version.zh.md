@@ -133,6 +133,21 @@ pnpm run migrate:sessions-to-v4
 
 并发转换时，子 Session 发布 V4 可能使父 Session 使用的子日志证据失效。只有这种源变化错误会在全部首次任务结束后串行重试一次；损坏、不支持的格式和已持有的写入锁会立即报告。完成行保留原始输入编号，并单独显示已完成数量，使乱序结果仍易于阅读。
 
+<a id="ptc-dispatch-repair"></a>
+### 修复冲突的 PTC 派发 id
+
+由按每次程序运行编号 PTC 子调用的版本记录的日志，在 provider 于连续步骤中重复使用同一个工具调用 id 时可能重复某个子调用 id，格式 reader 会拒绝整份日志。请先停止使用目标根目录的 DSH 进程：该命令会取得 Session 的写入占用，若占用被活动进程持有则拒绝执行而不是忽略。
+
+从仓库根目录运行：
+
+```sh
+pnpm run repair:sessions-ptc
+```
+
+该命令读取 `~/.dsh/sessions` 下以 `session.v<version>.jsonl.zstd` 形式存储的 V3 与 V4 压缩 Session 日志；日志的代际来自其记录的头，而不是命令。`--sessions-dir PATH` 选择其他根目录。未传 `--apply` 时为试运行：只列出计划的重命名，不写任何内容。传 `--apply` 时，它先把原始字节复制到 `~/.dsh/session-repair-backups/<session>/<timestamp>/`（`--backup-dir PATH` 选择其他根目录），只重写后一次冲突调用中记录 id 的字段——该调用自己的派发 id、嵌套派发的 parent 引用，以及稍后引用该 id 的 job 记录——然后仅重新压缩发生变化的帧。其余每一行逐字节保持不变，包括 Session 头和每个事件信封。
+
+对以下情况它会拒绝执行且不改动文件：最后一帧不完整的日志、写入占用被活动进程持有的 Session、无法归属到某次程序调用的重复 start，以及任何在命令不重写的行之外引用被重编号子调用的记录。回答定时程序提问的回复就属于此类：投影按精确的子调用 id 关联，因此只要被回答的提问被重编号，无论回复记录在界面上还是经 agent inbox 排队，该 Session 都会被拒绝。单个 Session 失败不会阻止其余 Session；摘要和系统临时目录中的 JSON 报告会列出每个结果。把备份复制回被修复的文件即可恢复。
+
 <a id="final-v3-vocabulary"></a>
 ### 发布 V4 前确认最终 V3 事件词汇
 

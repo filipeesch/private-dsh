@@ -4,7 +4,7 @@ import type { ToolCallBlock, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
 import type { PromptSection, ToolProviderResult } from '@deepseek-ai/dsh-system-prompt'
-import type { ResolvedToolSet, ToolDefinition, ToolExecutionResult } from './contracts.ts'
+import type { ResolvedToolSet, ToolCallPosition, ToolDefinition, ToolExecutionResult } from './contracts.ts'
 
 /** Model-call schemas produced by an executor. */
 export type ToolModelInput = Pick<ToolProviderResult, 'schemas' | 'knownNames'>
@@ -41,10 +41,7 @@ export interface ToolBatchInput {
    * as session initialization hooks. Without `log`, root call/result events are
    * omitted while `agent`, when provided, still supplies scope and execution context.
    */
-  readonly log?: {
-    readonly turn: number
-    readonly step: number
-  }
+  readonly log?: ToolCallPosition
 }
 
 /** One settled result correlated with its original model call. */

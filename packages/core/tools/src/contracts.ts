@@ -168,6 +168,16 @@ export interface ToolResult {
 export type ToolExecutionToken = symbol & { readonly [toolExecutionTokenBrand]: true }
 
 /**
+ * Committed model step that owns one tool call. The agent loop supplies it;
+ * nothing else may invent or rewrite it, because nested call identities derive
+ * from it.
+ */
+export interface ToolCallPosition {
+  readonly turn: number
+  readonly step: number
+}
+
+/**
  * Parsed input to the shared invocation pipeline. The pipeline
  * adds its own token to form a {@link ToolExecution};
  * callers do not choose that token.
@@ -198,6 +208,12 @@ export interface ToolExecutionInput {
    * `UNKNOWN_TOOL` before the policy pipeline.
    */
   readonly parent?: ToolExecutionToken
+  /**
+   * Committed model step owning this call; nested dispatchers propagate the
+   * enclosing value. Absent outside a model step, where the call records no
+   * root call or result events.
+   */
+  readonly position?: ToolCallPosition
   /** Required caller-owned cancellation for this invocation. */
   readonly signal: AbortSignal
 }

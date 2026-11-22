@@ -768,9 +768,9 @@ describe('the per-program tool-call limit', () => {
     expect(outcomes.sort()).toEqual(['active canceled', 'queued abandoned'])
     expect(queued).toEqual([])
     expect(events.filter(event => event.type === 'tool/ptc-dispatch-start').map(event => event.data))
-      .toMatchObject([{ name: 'active', subCallId: 'call-1:ptc:1' }])
+      .toMatchObject([{ name: 'active', subCallId: 'call-1:ptc-2026-11:1' }])
     expect(events.filter(event => event.type === 'tool/ptc-dispatch').map(event => event.data))
-      .toMatchObject([{ name: 'active', subCallId: 'call-1:ptc:1', isError: true }])
+      .toMatchObject([{ name: 'active', subCallId: 'call-1:ptc-2026-11:1', isError: true }])
   })
 
   it.each([
@@ -886,7 +886,7 @@ describe('the sub-dispatch scheduler (native concurrency contract)', () => {
     // One start per dispatch, paired with its settle by subCallId, starts in submission order.
     const starts = events.filter(event => event.type === 'tool/ptc-dispatch-start').map(event => event.data as { subCallId: string })
     const settles = events.filter(event => event.type === 'tool/ptc-dispatch').map(event => event.data as { subCallId: string })
-    expect(starts.map(start => start.subCallId)).toEqual(['call-1:ptc:1', 'call-1:ptc:2', 'call-1:ptc:3'])
+    expect(starts.map(start => start.subCallId)).toEqual(['call-1:ptc-2026-11:1', 'call-1:ptc-2026-11:2', 'call-1:ptc-2026-11:3'])
     expect(new Set(settles.map(settle => settle.subCallId))).toEqual(new Set(starts.map(start => start.subCallId)))
   })
 
@@ -1018,7 +1018,7 @@ describe('the sub-dispatch scheduler (native concurrency contract)', () => {
       // Both submissions are in; the second pre-execute must NOT have entered
       // while the first is still awaiting its policy decision.
       await expect.poll(() => stages.length).toBeGreaterThanOrEqual(1)
-      expect(stages).toEqual(['pre-enter:call-1:ptc:1'])
+      expect(stages).toEqual(['pre-enter:call-1:ptc-2026-11:1'])
       releaseGate!()
       await expect.poll(() => gated.pending()).toBe(2)
       gated.releaseAll()
@@ -1028,8 +1028,8 @@ describe('the sub-dispatch scheduler (native concurrency contract)', () => {
     const result = await runCode(ctx, 'program')
     expect(result.isError).toBe(false)
     expect(stages).toEqual([
-      'pre-enter:call-1:ptc:1', 'pre-exit:call-1:ptc:1',
-      'pre-enter:call-1:ptc:2', 'pre-exit:call-1:ptc:2',
+      'pre-enter:call-1:ptc-2026-11:1', 'pre-exit:call-1:ptc-2026-11:1',
+      'pre-enter:call-1:ptc-2026-11:2', 'pre-exit:call-1:ptc-2026-11:2',
     ])
   })
 
@@ -1134,10 +1134,10 @@ describe('the sub-dispatch scheduler (native concurrency contract)', () => {
     const result = await runCode(ctx, 'program')
     expect(result.isError).toBe(false)
     // Post-execute observed submission order regardless of completion interleave.
-    expect(postOrder).toEqual(['call-1:ptc:1', 'call-1:ptc:2'])
+    expect(postOrder).toEqual(['call-1:ptc-2026-11:1', 'call-1:ptc-2026-11:2'])
     // Deferred contexts reach the outer result in the same order.
     expect(result.additionalContexts?.map(c => (c.content[0] as { text: string }).text))
-      .toEqual(['ctx:call-1:ptc:1', 'ctx:call-1:ptc:2'])
+      .toEqual(['ctx:call-1:ptc-2026-11:1', 'ctx:call-1:ptc-2026-11:2'])
   })
 
   it('a queued-unstarted call abandoned by run settlement logs no start event', async () => {
@@ -1165,8 +1165,8 @@ describe('the sub-dispatch scheduler (native concurrency contract)', () => {
     // w1 started and settled under the abort; w2 never started and never
     // settled — no start event, no settle event, binding rejected with the
     // abandonment message at drain time.
-    expect(starts).toEqual(['call-1:ptc:1'])
-    expect(settles).toEqual(['call-1:ptc:1'])
+    expect(starts).toEqual(['call-1:ptc-2026-11:1'])
+    expect(settles).toEqual(['call-1:ptc-2026-11:1'])
     expect(abandoned).toEqual(['run_code run is over (run_code settled); writer tool call abandoned'])
   })
 })
@@ -1239,11 +1239,11 @@ describe('the run_code dispatch bridge', () => {
     const dispatches = events.filter(event => event.type === 'tool/ptc-dispatch')
     expect(dispatches.map(event => event.data)).toEqual([
       {
-        rootCallId: 'call-1', parentCallId: 'call-1', subCallId: 'call-1:ptc:1', name: 'echo',
+        rootCallId: 'call-1', parentCallId: 'call-1', subCallId: 'call-1:ptc-2026-11:1', name: 'echo',
         arguments: { value: 'one' }, isError: false, content: [{ type: 'text', text: 'echo:one' }],
       },
       {
-        rootCallId: 'call-1', parentCallId: 'call-1', subCallId: 'call-1:ptc:2', name: 'echo',
+        rootCallId: 'call-1', parentCallId: 'call-1', subCallId: 'call-1:ptc-2026-11:2', name: 'echo',
         arguments: { value: 'two' }, isError: false, content: [{ type: 'text', text: 'echo:two' }],
       },
     ])
@@ -1635,12 +1635,12 @@ describe('the run_code dispatch bridge', () => {
     expect(result.additionalContexts).toMatchObject([
       {
         role: 'user',
-        content: [{ type: 'text', text: 'context for call-1:ptc:1' }],
+        content: [{ type: 'text', text: 'context for call-1:ptc-2026-11:1' }],
         source: { kind: 'test' },
       },
       {
         role: 'user',
-        content: [{ type: 'text', text: 'context for call-1:ptc:2' }],
+        content: [{ type: 'text', text: 'context for call-1:ptc-2026-11:2' }],
         source: { kind: 'test' },
       },
     ])
@@ -2005,7 +2005,7 @@ describe('the run_code dispatch bridge', () => {
       runtime.behavior = () => {
         controller.abort(new Error('caller cancelled'))
         // The cancellation case rejects with the signal's own reason.
-        // oxlint-disable-next-line typescript/prefer-promise-reject-errors
+        // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- the scripted rejection is the test subject
         return Promise.reject(rejection(controller.signal.reason))
       }
       return (await runCode(ctx, 'return 1', { signal: controller.signal })).error

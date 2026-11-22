@@ -64,7 +64,7 @@ kind: "package-reference"
 
 PTC 执行器公开保留的 `run_code` 传输，以及确定性的 TypeScript SDK。每个 SDK 绑定捕获冻结的 ToolSchema，经由调度器传入该次执行上下文。已开始的调用在策略之前只记录配对 id、名称和规范化参数；其结算事件保留渲染结果、可选展示元数据与结构化错误；元数据由该次调用的规范值投影并冻结，不改变程序读取的值或模型内容。描述与参数 schema 仅临时存活，不进入 Session 事件或 SDK 输出。调用通过复用原生并发约定的每次运行独有池调度。在纯 `ptc` 下，模型直呼仅供程序使用的 SDK 工具都会在策略之前解析为 `UNKNOWN_TOOL`——通告面与可调用面保持一致。中间绑定值只存在于执行局部；只有外层 `run_code` 结果有硬大小上限。
 
-新子调用使用 `<parent>:ptc:<n>` 标识。消费方将这些标识视为不透明值，并通过精确相等关联事件；恢复的历史标识保留原始字节。[PTC mode 决策](../../../.agents/notes/implemented/feature/2026-06-15-ptc.zh.md) 负责持久化命名与恢复规则。
+新的根子调用使用 `<parent>:ptc-2026-11:<turn>:<step>:<n>` 标识：外层调用、拥有该调用的模型步骤，以及派发序号。即使 provider 在连续步骤中重复使用同一个工具调用 id，步骤也能让标识在每个 Session 日志内保持唯一，因为格式 reader 只允许在不同步骤中重复同一通告的调用 id。嵌套派发改用 `<parentSubCallId>+<n>`：provider 可能通告一个与已生成子调用 id 相同的根 id，两种不相交的形式让两个子调用保持不同。不属于任何模型步骤的调用保留旧的 `<parent>:ptc:<n>` 形式。消费方将这些标识视为不透明值，并通过精确相等关联事件；恢复的历史标识保留原始字节。由按每次程序运行编号子调用的版本记录、而 provider 又在连续步骤中重复使用同一个工具调用 id 的日志仍可能包含重复的子调用 id，格式 reader 会拒绝这种日志；`pnpm run repair:sessions-ptc` 只重编号后一次调用中发生冲突的 id，先备份原始文件并校验结果，未传 `--apply` 时为试运行。[PTC mode 决策](../../../.agents/notes/implemented/feature/2026-06-15-ptc.zh.md) 负责持久化命名与恢复规则。
 
 TypeScript 中的 `read_image` 与 CUA 截图操作返回 `Image`，其中包含可读取的 `path`、`width` 和 `height`。将其传给 `inspect` 后，持久附件会按顺序与文本一起进入 `run_code` 结果。数组和对象内嵌的图片会随所在值一起展示。程序失败时，已 inspect 的输出随原始诊断一起呈现；外层替换的结果保持生效。输出策略移除截图或 read_image 图片时，绑定以 ToolCallError 拒绝，并包含保留的文本提示。额外上下文保留生成工具的归属。
 

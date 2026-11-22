@@ -17,7 +17,7 @@ export function apply(ctx) {
   }
   ctx.effect(() => () => { runtime.release = release })
   ctx.on('tools/execute', async (exec, next) => {
-    if (exec.callId === 'call_keep:ptc:2' && !exec.signal.aborted) {
+    if (exec.callId === 'call_keep:ptc-2026-11:1:1:2' && !exec.signal.aborted) {
       await new Promise(resolve => exec.signal.addEventListener('abort', resolve, { once: true }))
     }
     const result = await next()

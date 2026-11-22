@@ -36,7 +36,13 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { installProxyFromEnvironment } from '@deepseek-ai/dsh-http-proxy'
 import { DSH_LAUNCH_ENVIRONMENT_KEY, type LaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
 import { provideCmdline, type AppReady } from '@deepseek-ai/dsh-cmdline'
-import { createProcessShutdown, type ProcessShutdown } from './process-shutdown.ts'
+import {
+  createProcessShutdown,
+  PROCESS_SHUTDOWN_TIMEOUT_MS,
+  SHUTDOWN_BARRIER_BUDGET_MS,
+  type ProcessShutdown,
+} from './process-shutdown.ts'
+import { createProfileShutdownPhases } from './shutdown-phases.ts'
 
 const NAME = 'dsh'
 
@@ -305,7 +311,11 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
       options.profile, options.patchFiles, options.fromDefaultProfile, options.resolvedProfile,
     )
     const appReady = createAppReady()
-    const shutdown = createProcessShutdown(dispose)
+    // Set only when the boot contract commits; before that no Session write can
+    // have been accepted, so a completion request exits without the ordered
+    // sequence that would otherwise wait for the activation requesting it.
+    let bootCommitted = false
+    const shutdown = createProcessShutdown(createProfileShutdownPhases(() => app.current, dispose))
     const signalShutdown = new AbortController()
     const interrupt = (code: number): void => {
       signalShutdown.abort()
@@ -318,9 +328,12 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
     // complete; SIGINT is a user interrupt and reports 130.
     process.on('SIGTERM', () => { interrupt(0) })
     process.on('SIGINT', () => { interrupt(130) })
+    // A fatal failure joins the ordered shutdown instead of disposing the tree
+    // alone, so the durability barrier still runs before the process exits. The
+    // release bound covers that sequence; the fail-loud default would cut it.
     installFailLoud(NAME, process, async () => {
-      await app.current?.fiber.dispose()
-    })
+      await shutdown.shutdown(1)
+    }, PROCESS_SHUTDOWN_TIMEOUT_MS + SHUTDOWN_BARRIER_BUDGET_MS)
 
     const rootConfig = join(composed.profile.dir, PROFILE_ROOT_FILENAME)
     const profileContext: ProfileContext = {
@@ -345,7 +358,14 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
       // to every app plugin that injects the argument snapshot.
       provideCmdline(hostCtx, {
         args: options.args,
-        exit: code => void shutdown.shutdown(code),
+        // A completion request from a plugin that runs during activation (the
+        // command-line help) precedes the boot contract, so no durable work can
+        // exist yet; joining the ordered shutdown there would wait for the
+        // activation that is waiting for this exit.
+        exit: (code) => {
+          if (bootCommitted) void shutdown.shutdown(code)
+          else process.exit(code)
+        },
         ready: appReady.service,
       })
     })
@@ -353,6 +373,9 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
     if (!signalShutdown.signal.aborted
       && ctx.fiber.state === FiberState.ACTIVE
       && ctx.get('loader') !== undefined) {
+      // The readiness callbacks run inside commit(); a buffered stdin EOF there
+      // requests the ordered shutdown, so the flag must already be set.
+      bootCommitted = true
       appReady.commit()
     }
     return { ctx, shutdown }
