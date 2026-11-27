@@ -1,7 +1,7 @@
 # Short names for the Web and Desktop application commands. The package.json
 # scripts they call stay the source of truth; docs/development.md documents both.
 .DEFAULT_GOAL := help
-.PHONY: help build clean web desktop dev-web dev-desktop
+.PHONY: help build clean web desktop dev-web dev-desktop autostart-install autostart-status autostart-uninstall
 
 PNPM ?= pnpm
 ARGS ?=
@@ -15,6 +15,9 @@ help:
 	@echo "make dev-desktop  pnpm run dev:desktop     build, then launch Desktop"
 	@echo "ARGS='--no-open --port 3081' forwards options to the launched application;"
 	@echo "the Web commands accept dsh web flags, the Desktop launcher accepts none."
+	@echo "make autostart-install  start the Web UI in this checkout at macOS login"
+	@echo "make autostart-status   report the login item and whether port 3080 is serving"
+	@echo "make autostart-uninstall remove the login item; logs stay in ~/Library/Logs/dsh-web"
 
 build:
 	$(PNPM) run build
@@ -33,3 +36,12 @@ dev-web:
 
 dev-desktop:
 	$(PNPM) run dev:desktop $(ARGS)
+
+autostart-install:
+	@bash scripts/web-autostart.sh install
+
+autostart-status:
+	@bash scripts/web-autostart.sh status
+
+autostart-uninstall:
+	@bash scripts/web-autostart.sh uninstall

@@ -198,6 +198,8 @@ pnpm run dev:desktop     # build, then launch Desktop
 
 Arguments after a Web command reach `dsh web`, for example `pnpm run dev:web --no-open --port 3081`; `dev:web` also accepts `--skip-build` to reuse the existing artifact tree and `--no-serve` to run only the rebuild watchers beside a server started elsewhere. Both Web commands use the normal Harness home, while the Desktop commands use the isolated development home described in the [Desktop README](../apps/desktop/README.md). The root `Makefile` names the same commands as `make web`, `make dev-web`, `make desktop`, `make dev-desktop`, and `make build`; `ARGS='--no-open'` forwards options.
 
+On macOS, `make autostart-install` registers a user LaunchAgent that serves this checkout's built Web artifacts at login by running `make web ARGS='--no-open'`; `make autostart-status` reports the agent and whether port 3080 is serving, and `make autostart-uninstall` removes the agent while leaving the logs under `~/Library/Logs/dsh-web`. The agent runs this checkout directly, so it inherits whatever the working tree contains after a `git pull`, and a server already listening on the port is left untouched.
+
 ### TODO markers
 
 Use one of three comment tags to flag known issues in the code, ordered by urgency:

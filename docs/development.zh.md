@@ -203,6 +203,8 @@ pnpm run dev:desktop     # build, then launch Desktop
 
 Web 命令后面的参数会传给 `dsh web`，例如 `pnpm run dev:web --no-open --port 3081`；`dev:web` 还接受 `--skip-build` 复用现有产物树，以及 `--no-serve` 只运行重建 watcher、配合别处启动的服务器。两个 Web 命令使用正常的 Harness home，而 Desktop 命令使用 [Desktop README](../apps/desktop/README.zh.md) 描述的隔离开发 home。根目录 `Makefile` 以 `make web`、`make dev-web`、`make desktop`、`make dev-desktop` 和 `make build` 命名同一套命令；`ARGS='--no-open'` 用于转发参数。
 
+在 macOS 上，`make autostart-install` 注册一个用户 LaunchAgent，在登录时以 `make web ARGS='--no-open'` 提供本次检出所构建的 Web 产物；`make autostart-status` 报告该 agent 的状态以及端口 3080 是否正在提供服务，`make autostart-uninstall` 移除该 agent，`~/Library/Logs/dsh-web` 下的日志则保留。该 agent 直接运行本次检出，因此在执行 `git pull` 之后会继承工作树的当前内容；若该端口已有服务器在监听，则不予改动。
+
 ### TODO 标记
 
 请使用以下三种注释标签之一标记代码中的已知问题，按紧急程度排序：
